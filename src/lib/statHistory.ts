@@ -1,6 +1,7 @@
 import type { SimStats } from './playerMeta';
 
 export interface StatSnapshot {
+  id?: string;
   timestamp: number;
   sim: SimStats;
   ovr: number;
@@ -19,7 +20,7 @@ export function trainingDayKey(ts: number): number {
   return utcDate.getTime();
 }
 
-function computeOvr(sim: SimStats): number {
+export function computeOvr(sim: SimStats): number {
   const keys: (keyof SimStats)[] = ['con', 'pow', 'spd', 'fld', 'arm', 'pit', 'sta'];
   const total = keys.reduce((sum, k) => sum + sim[k], 0);
   return Math.round(total / keys.length);
@@ -123,6 +124,39 @@ export function getStatSeries(uuid: string, stat: keyof SimStats): { timestamp: 
   return getPlayerHistory(uuid).map((s) => ({ timestamp: s.timestamp, value: s.sim[stat] }));
 }
 
+export function updateSnapshot(playerUuid: string, timestamp: number, sim: SimStats): void {
+  const store = loadHistory();
+  const entries = store[playerUuid];
+  if (!entries) return;
+  const idx = entries.findIndex((s) => s.timestamp === timestamp);
+  if (idx === -1) return;
+  entries[idx] = { ...entries[idx], sim: { ...sim }, ovr: computeOvr(sim) };
+  saveHistory(store);
+}
+
+export function deleteSnapshot(playerUuid: string, timestamp: number): void {
+  const store = loadHistory();
+  const entries = store[playerUuid];
+  if (!entries) return;
+  store[playerUuid] = entries.filter((s) => s.timestamp !== timestamp);
+  if (store[playerUuid].length === 0) delete store[playerUuid];
+  saveHistory(store);
+}
+
+export function updateSnapshotApi(id: string, sim: SimStats, ovr: number): void {
+  fetch('/api/stat-history', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, sim, ovr }),
+  }).catch(() => {});
+}
+
+export function deleteSnapshotApi(id: string): void {
+  fetch(`/api/stat-history?id=${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  }).catch(() => {});
+}
+
 function saveSnapshotToApi(playerUuid: string, sim: SimStats, ovr: number, timestamp: number): void {
   fetch('/api/stat-history', {
     method: 'POST',
@@ -132,6 +166,7 @@ function saveSnapshotToApi(playerUuid: string, sim: SimStats, ovr: number, times
 }
 
 interface ApiStatRow {
+  id: string;
   playerUuid: string;
   sim: SimStats;
   ovr: number;
@@ -146,6 +181,7 @@ export async function fetchHistoryFromApi(): Promise<StatHistoryStore> {
     const store: StatHistoryStore = {};
     for (const row of rows) {
       const snap: StatSnapshot = {
+        id: row.id,
         timestamp: new Date(row.recordedAt).getTime(),
         sim: row.sim,
         ovr: row.ovr,
@@ -172,10 +208,14 @@ export function mergeApiHistory(apiStore: StatHistoryStore): void {
     const merged = [...localEntries];
 
     for (const apiSnap of apiEntries) {
-      const duplicate = merged.some(
+      const match = merged.findIndex(
         (s) => Math.abs(s.timestamp - apiSnap.timestamp) < FUZZY_MS && simEqual(s.sim, apiSnap.sim),
       );
-      if (!duplicate) merged.push(apiSnap);
+      if (match >= 0) {
+        if (apiSnap.id && !merged[match].id) merged[match].id = apiSnap.id;
+      } else {
+        merged.push(apiSnap);
+      }
     }
 
     merged.sort((a, b) => a.timestamp - b.timestamp);
