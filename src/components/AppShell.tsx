@@ -1,0 +1,203 @@
+import { useState } from 'react';
+import { AuthUserButton } from '@/hooks/useAuthUser';
+import type { ModeFilter, TimeFilter } from '../lib/api';
+import type { PlayerMetaStore } from '../lib/playerMeta';
+import type { Team } from '../lib/types';
+import { InsightsPanel } from './InsightsPanel';
+import { PitcherCard } from './PitcherCard';
+import { RawJsonPanel } from './RawJsonPanel';
+import { RecentGamesPanel } from './RecentGamesPanel';
+import { RecruitAnalyzer } from './RecruitAnalyzer';
+import { RosterEditor } from './RosterEditor';
+import { FieldPositionsPanel, OptimalBattingOrder, PositionGuidancePanel } from './RosterOptimizer';
+import { StatsTable } from './StatsTable';
+import { TalentAdvisor } from './TalentAdvisor';
+import { TeamLookup } from './TeamLookup';
+import { TimeRangeFilter } from './TimeRangeFilter';
+import { ModeBreakdown } from './ModeBreakdown';
+import { TrainingPanel } from './TrainingPanel';
+
+type Tab = 'overview' | 'stats' | 'roster' | 'tools' | 'debug';
+
+const TABS: { value: Tab; label: string; devOnly?: boolean }[] = [
+  { value: 'overview', label: 'Overview' },
+  { value: 'stats', label: 'Stats' },
+  { value: 'roster', label: 'Roster' },
+  { value: 'tools', label: 'Tools' },
+  { value: 'debug', label: 'Debug', devOnly: true },
+];
+
+interface Props {
+  team: Team;
+  raw: unknown;
+  uuid: string;
+  onUuidChange: (uuid: string) => void;
+  onRefresh: () => void;
+  loading: boolean;
+  metaStore: PlayerMetaStore;
+  onMetaStoreChange: (next: PlayerMetaStore) => void;
+  time: TimeFilter;
+  mode: ModeFilter;
+  onFilterChange: (next: { time: TimeFilter; mode: ModeFilter }) => void;
+  filterLoading: boolean;
+  filterError?: string;
+  buildAdviseContext: () => string;
+  buildCompactContext: () => string;
+  buildInsights: () => string;
+}
+
+export function AppShell({
+  team,
+  raw,
+  uuid,
+  onUuidChange,
+  onRefresh,
+  loading,
+  metaStore,
+  onMetaStoreChange,
+  time,
+  mode,
+  onFilterChange,
+  filterLoading,
+  filterError,
+  buildAdviseContext,
+  buildCompactContext,
+  buildInsights,
+}: Props) {
+  const [tab, setTab] = useState<Tab>('overview');
+
+  const visibleTabs = process.env.NODE_ENV === 'development'
+    ? TABS
+    : TABS.filter((t) => !t.devOnly);
+
+  return (
+    <div className="mx-auto max-w-6xl">
+      {/* Top bar */}
+      <header className="sticky top-0 z-30 border-b border-slate-800 bg-slate-950 px-4 py-3 sm:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-baseline gap-2">
+              <h1 className="truncate text-lg font-bold text-slate-100">
+                {team.name ?? 'Unknown Team'}
+              </h1>
+              {team.recentRecord ? (
+                <span className="shrink-0 text-xs text-slate-400">
+                  {team.recentRecord}
+                </span>
+              ) : null}
+            </div>
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+              {team.manager ? (
+                <span className="text-[11px] text-slate-500">
+                  Manager: {team.manager}
+                </span>
+              ) : null}
+              <TeamLookup
+                uuid={uuid}
+                onChange={onUuidChange}
+                loading={loading}
+                compact
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <TimeRangeFilter
+              time={time}
+              mode={mode}
+              onChange={onFilterChange}
+              loading={filterLoading}
+              inline
+            />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onRefresh}
+                disabled={loading}
+                className="rounded-md border border-slate-700 px-2.5 py-1 text-xs text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+              >
+                {loading ? 'Refreshing…' : 'Refresh'}
+              </button>
+              <AuthUserButton />
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Tab bar */}
+      <nav className="border-b border-slate-800 px-4 sm:px-6">
+        <div className="flex gap-1">
+          {visibleTabs.map((t) => (
+            <button
+              key={t.value}
+              type="button"
+              onClick={() => setTab(t.value)}
+              className={
+                '-mb-px px-3 py-2 text-sm font-medium uppercase tracking-wider transition-colors ' +
+                (tab === t.value
+                  ? 'border-b-2 border-emerald-400 text-emerald-400'
+                  : 'text-slate-400 hover:text-slate-200')
+              }
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      {/* Tab content */}
+      <div className="space-y-4 p-4 sm:p-6">
+        {filterError ? (
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm text-amber-200">
+            {filterError}
+          </div>
+        ) : null}
+
+        <div className={tab === 'overview' ? 'space-y-4' : 'hidden'}>
+          <OptimalBattingOrder team={team} metaStore={metaStore} />
+          <FieldPositionsPanel team={team} metaStore={metaStore} teamUuid={uuid} onNavigateToRoster={() => setTab('roster')} />
+          <PositionGuidancePanel />
+          <InsightsPanel buildContext={buildAdviseContext} buildCompactContext={buildCompactContext} buildInsights={buildInsights} teamUuid={uuid} />
+        </div>
+
+        <div className={tab === 'stats' ? 'space-y-4' : 'hidden'}>
+          <StatsTable team={team} />
+          <PitcherCard pitcher={team.pitcher} />
+          <RecentGamesPanel team={team} />
+          <ModeBreakdown teamUuid={uuid} time={time} />
+        </div>
+
+        <div className={tab === 'roster' ? 'space-y-4' : 'hidden'}>
+          <TrainingPanel team={team} metaStore={metaStore} />
+          <RosterEditor
+            team={team}
+            metaStore={metaStore}
+            onChange={onMetaStoreChange}
+          />
+        </div>
+
+        <div className={tab === 'tools' ? 'space-y-4' : 'hidden'}>
+          <TalentAdvisor
+            players={team.players}
+            metaStore={metaStore}
+            buildContext={buildAdviseContext}
+            buildCompactContext={buildCompactContext}
+            teamUuid={uuid}
+          />
+          <RecruitAnalyzer
+            open
+            onClose={() => setTab('overview')}
+            buildContext={buildAdviseContext}
+            buildCompactContext={buildCompactContext}
+            teamUuid={uuid}
+            inline
+          />
+        </div>
+
+        {tab === 'debug' && process.env.NODE_ENV === 'development' && (
+          <RawJsonPanel raw={raw} />
+        )}
+      </div>
+    </div>
+  );
+}
