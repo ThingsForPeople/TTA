@@ -14,9 +14,15 @@ import { SIM_KEYS, SIM_LABELS, type SimStats, type PlayerMetaStore, type InjuryR
 import {
   getAllPlayerHistories,
   getLatestDelta,
+  updateSnapshot,
+  deleteSnapshot,
+  updateSnapshotApi,
+  deleteSnapshotApi,
+  computeOvr,
   trainingDayKey,
   type StatSnapshot,
 } from '../lib/statHistory';
+import { StatHistoryEditor } from './StatHistoryEditor';
 import type { Player, Team } from '../lib/types';
 
 const INJURY_DOT_COLORS: Record<string, string> = {
@@ -49,7 +55,9 @@ function statValue(snap: StatSnapshot, stat: ViewStat): number {
 export function TrainingPanel({ team, metaStore }: Props) {
   const [viewStat, setViewStat] = useState<ViewStat>('ovr');
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const histories = useMemo(() => getAllPlayerHistories(), [team]);
+  const [editingPlayer, setEditingPlayer] = useState<string | null>(null);
+  const [historyVersion, setHistoryVersion] = useState(0);
+  const histories = useMemo(() => getAllPlayerHistories(), [team, historyVersion]);
 
   const playersWithHistory = useMemo(() => {
     return team.players
@@ -115,19 +123,31 @@ export function TrainingPanel({ team, metaStore }: Props) {
                   {playersWithHistory.map(({ player }) => {
                     const active = selected.size === 0 || selected.has(player.uuid!);
                     return (
-                      <button
-                        key={player.uuid}
-                        type="button"
-                        onClick={() => togglePlayer(player.uuid!)}
-                        className={
-                          'rounded px-1.5 py-0.5 text-[10px] transition-colors ' +
-                          (active
-                            ? 'bg-emerald-500/20 text-emerald-300'
-                            : 'bg-slate-800 text-slate-500')
-                        }
-                      >
-                        {player.name}
-                      </button>
+                      <span key={player.uuid} className="inline-flex items-center gap-0.5">
+                        <button
+                          type="button"
+                          onClick={() => togglePlayer(player.uuid!)}
+                          className={
+                            'rounded px-1.5 py-0.5 text-[10px] transition-colors ' +
+                            (active
+                              ? 'bg-emerald-500/20 text-emerald-300'
+                              : 'bg-slate-800 text-slate-500')
+                          }
+                        >
+                          {player.name}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingPlayer(player.uuid!)}
+                          className="rounded p-0.5 text-slate-500 hover:text-slate-300"
+                          aria-label={`Edit history for ${player.name}`}
+                        >
+                          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                            <path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492ZM5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0Z" />
+                            <path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.902 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319Zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 0 0 2.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 0 0 1.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 0 0-1.115 2.693l.16.291c.415.764-.42 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 0 0-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 0 0-2.692-1.115l-.292.16c-.764.415-1.6-.42-1.184-1.185l.159-.291a1.873 1.873 0 0 0-1.116-2.693l-.318-.094c-.835-.246-.835-1.428 0-1.674l.319-.094a1.873 1.873 0 0 0 1.115-2.692l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 0 0 2.692-1.116l.094-.318Z" />
+                          </svg>
+                        </button>
+                      </span>
                     );
                   })}
                 </div>
@@ -153,6 +173,24 @@ export function TrainingPanel({ team, metaStore }: Props) {
             </>
           )}
         </div>
+
+      {editingPlayer && histories[editingPlayer] && (
+        <StatHistoryEditor
+          player={team.players.find((p) => p.uuid === editingPlayer)!}
+          snapshots={histories[editingPlayer]}
+          onClose={() => setEditingPlayer(null)}
+          onUpdate={(snap, sim) => {
+            updateSnapshot(editingPlayer, snap.timestamp, sim);
+            if (snap.id) updateSnapshotApi(snap.id, sim, computeOvr(sim));
+            setHistoryVersion((v) => v + 1);
+          }}
+          onDelete={(snap) => {
+            deleteSnapshot(editingPlayer, snap.timestamp);
+            if (snap.id) deleteSnapshotApi(snap.id);
+            setHistoryVersion((v) => v + 1);
+          }}
+        />
+      )}
     </CollapsiblePanel>
   );
 }
