@@ -1,0 +1,48 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1779302312336,
+      "tag": "0000_busy_alex_power",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1779310000000,
+      "tag": "0001_add_injury_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1779320000000,
+      "tag": "0002_add_team_uuid_to_users",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1779330000000,
+      "tag": "0003_add_pitch_talents",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1779340000000,
+      "tag": "0004_add_recent_teams",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1779350000000,
+      "tag": "0005_add_position_weights",
+      "breakpoints": true
+    }
+  ]
+}

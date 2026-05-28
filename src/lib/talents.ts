@@ -1,0 +1,163 @@
+export interface TalentDef {
+  id: string;
+  name: string;
+  description: string;
+  category: 'hitting' | 'pitching' | 'fielding' | 'baserunning';
+}
+
+const TALENTS: TalentDef[] = [
+  // Hitting — core
+  { id: 'lefty_loosey', name: 'Lefty Loosey', description: 'Left-handed batters gain contact and power against right-handed pitchers.', category: 'hitting' },
+  { id: 'righty_tighty', name: 'Righty Tighty', description: 'Right-handed batters gain contact and power against left-handed pitchers.', category: 'hitting' },
+  { id: 'platoon_offspeed_tracker', name: 'Off Speed Tracker', description: 'Better contact against off-speed pitches.', category: 'hitting' },
+  { id: 'ice_water', name: 'Mental Warfare', description: "Hits increase the pitcher's mistake chance. Stronger with runners on.", category: 'hitting' },
+  { id: 'clutch_cascade', name: 'Clutch Cascade', description: "A hit with runners on boosts the next batter's contact, power, and swing.", category: 'hitting' },
+  { id: 'pressure_cooker', name: 'Clutch', description: 'Contact and power boost with runners on base.', category: 'hitting' },
+  { id: 'release_valve', name: 'Pressure Cooker', description: 'Outs with runners on build charges. A hit discharges them for a power and line drive surge.', category: 'hitting' },
+  { id: 'count_fighter', name: 'Battler', description: 'More likely to swing and foul off pitches with two strikes.', category: 'hitting' },
+  { id: 'pitchers_bane', name: 'Exhausting', description: "Each pitch in the at-bat increases the pitcher's mistake chance.", category: 'hitting' },
+  { id: 'fish_eye', name: 'Disciplined', description: 'Less likely to chase pitches out of the zone.', category: 'hitting' },
+  { id: 'pattern_recognition', name: 'Pattern Recognition', description: 'Contact and power increase after seeing the same pitch type in the same zone three times.', category: 'hitting' },
+  { id: 'fear_me', name: 'Fear Me', description: 'Pitcher throws more balls in the first three pitches.', category: 'hitting' },
+  { id: 'at_bat_escalation', name: 'Knowledge is Power', description: 'Power grows with each pitch in the at-bat.', category: 'hitting' },
+  { id: 'first_pitch_hunter', name: 'Set the Tone', description: 'Contact, power, and swing boost on the first pitch of every at-bat.', category: 'hitting' },
+  { id: 'early_count_killer', name: 'Early Bird', description: 'Contact and power boost on the first three pitches of every at-bat.', category: 'hitting' },
+  { id: 'rally_igniter', name: 'Rally Time', description: "An early-count hit boosts the next batter's swing, contact, and power.", category: 'hitting' },
+  { id: 'confidence_shaker', name: 'Confidence Shaker', description: "An early-count hit increases the pitcher's mistake chance.", category: 'hitting' },
+  { id: 'quick_strike_adaptation', name: 'Waste No Time', description: 'Each early-count hit boosts contact for the rest of the game.', category: 'hitting' },
+  { id: 'high_noon', name: 'Sun Glasses', description: 'Contact boost against fastballs in day games.', category: 'hitting' },
+  { id: 'night_owl', name: 'Night Owl', description: 'Contact boost against breaking and off-speed pitches in night games.', category: 'hitting' },
+  { id: 'leadoff_catalyst', name: 'Table Setter', description: 'Contact boost when leading off an inning.', category: 'hitting' },
+  { id: 'cleanup_catalyst', name: 'The Janitor', description: 'Power boost when batting cleanup.', category: 'hitting' },
+  { id: 'hot_streak', name: 'Breakout Season', description: 'Contact and power boost when batting over .300 on the season.', category: 'hitting' },
+  { id: 'ice_strike', name: 'Hard to Handle', description: "Slows the initial fielder's throw release on batted balls.", category: 'hitting' },
+  { id: 'sweet_tooth', name: 'Sweet Tooth', description: 'Boosts sweet-spot authority, increasing homerun chance on contact.', category: 'hitting' },
+  // Hitting — zone (general)
+  { id: 'hz_eff_contact', name: 'Zone Dialed', description: 'Bat cleanly meeting ball / sweet spot ring.', category: 'hitting' },
+  { id: 'hz_eff_line_drive', name: 'Zone Driver', description: 'Flat laser trajectory from contact point.', category: 'hitting' },
+  { id: 'hz_eff_grounder', name: 'Zone Chopper', description: 'Pitch driven down into the ground.', category: 'hitting' },
+  { id: 'hz_eff_fly_ball', name: 'Zone Popper', description: 'Ball launched skyward from swing.', category: 'hitting' },
+  { id: 'hz_eff_aggressive', name: 'Zone Hacker', description: 'Aggressive bat swing with force lines.', category: 'hitting' },
+  // Hitting — zone (high)
+  { id: 'hz:high:contact', name: 'High Dialed', description: 'High pitches make better contact.', category: 'hitting' },
+  { id: 'hz:high:line_drive', name: 'High Driver', description: 'High pitches drive more line drives.', category: 'hitting' },
+  { id: 'hz:high:grounder', name: 'High Chopper', description: 'High pitches chop more ground balls.', category: 'hitting' },
+  { id: 'hz:high:fly_ball', name: 'High Popper', description: 'High pitches lift more fly balls.', category: 'hitting' },
+  { id: 'hz:high:aggressive', name: 'High Hacker', description: 'High pitches attack pitches aggressively.', category: 'hitting' },
+  // Hitting — zone (low)
+  { id: 'hz:low:contact', name: 'Low Dialed', description: 'Low pitches make better contact.', category: 'hitting' },
+  { id: 'hz:low:line_drive', name: 'Low Driver', description: 'Low pitches drive more line drives.', category: 'hitting' },
+  { id: 'hz:low:grounder', name: 'Low Chopper', description: 'Low pitches chop more ground balls.', category: 'hitting' },
+  { id: 'hz:low:fly_ball', name: 'Low Popper', description: 'Low pitches lift more fly balls.', category: 'hitting' },
+  { id: 'hz:low:aggressive', name: 'Low Hacker', description: 'Low pitches attack pitches aggressively.', category: 'hitting' },
+  // Hitting — zone (inside)
+  { id: 'hz:inside:contact', name: 'Inside Dialed', description: 'Inside pitches make better contact.', category: 'hitting' },
+  { id: 'hz:inside:line_drive', name: 'Inside Driver', description: 'Inside pitches drive more line drives.', category: 'hitting' },
+  { id: 'hz:inside:grounder', name: 'Inside Chopper', description: 'Inside pitches chop more ground balls.', category: 'hitting' },
+  { id: 'hz:inside:fly_ball', name: 'Inside Popper', description: 'Inside pitches lift more fly balls.', category: 'hitting' },
+  { id: 'hz:inside:aggressive', name: 'Inside Hacker', description: 'Inside pitches attack pitches aggressively.', category: 'hitting' },
+  // Hitting — zone (outside)
+  { id: 'hz:outside:contact', name: 'Outside Dialed', description: 'Outside pitches make better contact.', category: 'hitting' },
+  { id: 'hz:outside:line_drive', name: 'Outside Driver', description: 'Outside pitches drive more line drives.', category: 'hitting' },
+  { id: 'hz:outside:grounder', name: 'Outside Chopper', description: 'Outside pitches chop more ground balls.', category: 'hitting' },
+  { id: 'hz:outside:fly_ball', name: 'Outside Popper', description: 'Outside pitches lift more fly balls.', category: 'hitting' },
+  { id: 'hz:outside:aggressive', name: 'Outside Hacker', description: 'Outside pitches attack pitches aggressively.', category: 'hitting' },
+
+  // Fielding
+  { id: 'fielding.charge_it', name: 'Charger', description: 'Infielders move faster on ground balls.', category: 'fielding' },
+  { id: 'fielding.no_doubles', name: 'No Doubles', description: 'Outfielders move faster on ground balls.', category: 'fielding' },
+  { id: 'hot_potato', name: 'Hot Potato', description: "Each catch in a play improves the next throw's speed and accuracy.", category: 'fielding' },
+  { id: 'fielding.putaway_cannon', name: 'Warmed Up', description: 'Throw speed boost after recording an out.', category: 'fielding' },
+  { id: 'pop_time', name: 'Pop Time', description: 'Faster throw to second on steal attempts.', category: 'fielding' },
+  { id: 'fielding.middle_magic', name: 'Heads & Tails', description: 'Middle infielders move faster on ground balls. Bonus stacks when both SS and 2B have this talent.', category: 'fielding' },
+
+  // Baserunning
+  { id: 'base_thief', name: 'Thief', description: 'Unlocks stealing. Higher tiers improve steal success.', category: 'baserunning' },
+  { id: 'fleet_footed', name: 'Quick Silver', description: 'Faster baserunning speed.', category: 'baserunning' },
+  { id: 'hook_slide', name: 'Evasive', description: 'Improves odds in close plays at the bag.', category: 'baserunning' },
+  { id: 'quick_jump', name: 'Anticipation', description: 'Better jump timing on steal attempts.', category: 'baserunning' },
+  { id: 'adrenaline_boost', name: 'Worthy Sacrifice', description: 'Speeds up after a teammate is retired.', category: 'baserunning' },
+  { id: 'grounder_speed', name: 'Hustler', description: 'Speed boost on ground balls to beat out throws.', category: 'baserunning' },
+
+  // Pitching — core
+  { id: 'wind_up_power', name: 'Special Delivery', description: 'Velocity boost when pitching with bases empty.', category: 'pitching' },
+  { id: 'stretch_control', name: 'Composure', description: 'Fewer mistakes when pitching with runners on base.', category: 'pitching' },
+  { id: 'quick_pitch', name: 'Quick Pitch', description: 'Faster delivery gives runners worse jump timing on steals.', category: 'pitching' },
+  { id: 'hold_em', name: "Hold 'Em", description: 'Runners attempt fewer steals.', category: 'pitching' },
+  { id: 'battery_control', name: 'Law & Order', description: 'When both pitcher and catcher have this talent, steal outcomes shift toward outs.', category: 'pitching' },
+  { id: 'lefty_edge', name: "Lefty's Edge", description: 'Control boost against left-handed batters.', category: 'pitching' },
+  { id: 'righty_edge', name: "Righty's Edge", description: 'Control boost against right-handed batters.', category: 'pitching' },
+  { id: 'bait', name: 'Bait', description: 'Batters are more likely to chase pitches off the plate.', category: 'pitching' },
+  { id: 'heat_wave', name: 'High Noon', description: 'Velocity boost in day games.', category: 'pitching' },
+  { id: 'under_the_lights', name: 'Spotlights', description: 'Movement boost in night games.', category: 'pitching' },
+  // Pitching — pitch types
+  { id: 'fastball', name: 'Fastball', description: 'Adds a four-seam fastball. Boosts velocity and movement.', category: 'pitching' },
+  { id: 'two_seam_fastball', name: 'Two-Seam Fastball', description: 'Adds a two-seam fastball. Boosts velocity and movement.', category: 'pitching' },
+  { id: 'cutter', name: 'Cutter', description: 'Adds a cutter. Boosts velocity and movement.', category: 'pitching' },
+  { id: 'sinker', name: 'Sinker', description: 'Adds a sinker. Boosts velocity and movement.', category: 'pitching' },
+  { id: 'changeup', name: 'Changeup', description: 'Adds a changeup. Boosts velocity and movement.', category: 'pitching' },
+  { id: 'curveball', name: 'Curveball', description: 'Adds a curveball. Boosts velocity and movement.', category: 'pitching' },
+  { id: 'slider', name: 'Slider', description: 'Adds a slider. Boosts velocity and movement.', category: 'pitching' },
+  { id: 'splitter', name: 'Splitter', description: 'Adds a splitter. Boosts velocity and movement.', category: 'pitching' },
+  { id: 'knuckleball', name: 'Knuckleball', description: 'Adds a knuckleball. Boosts movement but increases mistake chance.', category: 'pitching' },
+  // Pitching — zone (general)
+  { id: 'pz_base_zone', name: 'Zone Aim', description: 'Crosshair sight locked on a baseball strike zone.', category: 'pitching' },
+  { id: 'pz_eff_velocity', name: 'Zone Heat', description: 'Fireball with speed lines.', category: 'pitching' },
+  { id: 'pz_eff_movement', name: 'Zone Break', description: 'Ball with sharp breaking arc trail.', category: 'pitching' },
+  { id: 'pz_eff_grounders', name: 'Zone Sink', description: 'Ball diving down into dirt.', category: 'pitching' },
+  { id: 'pz_eff_swing', name: 'Zone Ice', description: 'Snowflake/ice crystal freezing strike zone.', category: 'pitching' },
+  { id: 'pz_eff_whiffs', name: 'Zone Punch', description: 'Bat swinging through empty air.', category: 'pitching' },
+  { id: 'pz_eff_control', name: 'Zone Command', description: 'Bullseye target locked on strike zone.', category: 'pitching' },
+  // Pitching — aim
+  { id: 'base:high', name: 'High Aim', description: 'Your pitcher targets the high zone more frequently with pitches of this type.', category: 'pitching' },
+  { id: 'base:low', name: 'Low Aim', description: 'Your pitcher targets the low zone more frequently with pitches of this type.', category: 'pitching' },
+  { id: 'base:inside', name: 'Inside Aim', description: 'Your pitcher targets the inside zone more frequently with pitches of this type.', category: 'pitching' },
+  { id: 'base:outside', name: 'Outside Aim', description: 'Your pitcher targets the outside zone more frequently with pitches of this type.', category: 'pitching' },
+  // Pitching — zone (high)
+  { id: 'zone:high:velocity', name: 'High Heat', description: 'Pitches of this type in the high zone gain extra velocity.', category: 'pitching' },
+  { id: 'zone:high:movement', name: 'High Break', description: 'Pitches of this type in the high zone gain extra movement.', category: 'pitching' },
+  { id: 'zone:high:grounders', name: 'High Sink', description: 'Pitches of this type in the high zone induce more ground balls.', category: 'pitching' },
+  { id: 'zone:high:swing', name: 'High Ice', description: 'Pitches of this type in the high zone freeze batters looking at strike three.', category: 'pitching' },
+  { id: 'zone:high:whiffs', name: 'High Punch', description: 'Pitches of this type in the high zone generate more swings and misses.', category: 'pitching' },
+  { id: 'zone:high:control', name: 'High Command', description: 'Pitches of this type in the high zone overpower batters more often.', category: 'pitching' },
+  // Pitching — zone (low)
+  { id: 'zone:low:velocity', name: 'Low Heat', description: 'Pitches of this type in the low zone gain extra velocity.', category: 'pitching' },
+  { id: 'zone:low:movement', name: 'Low Break', description: 'Pitches of this type in the low zone gain extra movement.', category: 'pitching' },
+  { id: 'zone:low:grounders', name: 'Low Sink', description: 'Pitches of this type in the low zone induce more ground balls.', category: 'pitching' },
+  { id: 'zone:low:swing', name: 'Low Ice', description: 'Pitches of this type in the low zone freeze batters looking at strike three.', category: 'pitching' },
+  { id: 'zone:low:whiffs', name: 'Low Punch', description: 'Pitches of this type in the low zone generate more swings and misses.', category: 'pitching' },
+  { id: 'zone:low:control', name: 'Low Command', description: 'Pitches of this type in the low zone overpower batters more often.', category: 'pitching' },
+  // Pitching — zone (inside)
+  { id: 'zone:inside:velocity', name: 'Inside Heat', description: 'Pitches of this type in the inside zone gain extra velocity.', category: 'pitching' },
+  { id: 'zone:inside:movement', name: 'Inside Break', description: 'Pitches of this type in the inside zone gain extra movement.', category: 'pitching' },
+  { id: 'zone:inside:grounders', name: 'Inside Sink', description: 'Pitches of this type in the inside zone induce more ground balls.', category: 'pitching' },
+  { id: 'zone:inside:swing', name: 'Inside Ice', description: 'Pitches of this type in the inside zone freeze batters looking at strike three.', category: 'pitching' },
+  { id: 'zone:inside:whiffs', name: 'Inside Punch', description: 'Pitches of this type in the inside zone generate more swings and misses.', category: 'pitching' },
+  { id: 'zone:inside:control', name: 'Inside Command', description: 'Pitches of this type in the inside zone overpower batters more often.', category: 'pitching' },
+  // Pitching — zone (outside)
+  { id: 'zone:outside:velocity', name: 'Outside Heat', description: 'Pitches of this type in the outside zone gain extra velocity.', category: 'pitching' },
+  { id: 'zone:outside:movement', name: 'Outside Break', description: 'Pitches of this type in the outside zone gain extra movement.', category: 'pitching' },
+  { id: 'zone:outside:grounders', name: 'Outside Sink', description: 'Pitches of this type in the outside zone induce more ground balls.', category: 'pitching' },
+  { id: 'zone:outside:swing', name: 'Outside Ice', description: 'Pitches of this type in the outside zone freeze batters looking at strike three.', category: 'pitching' },
+  { id: 'zone:outside:whiffs', name: 'Outside Punch', description: 'Pitches of this type in the outside zone generate more swings and misses.', category: 'pitching' },
+  { id: 'zone:outside:control', name: 'Outside Command', description: 'Pitches of this type in the outside zone overpower batters more often.', category: 'pitching' },
+];
+
+export const ALL_TALENTS = TALENTS;
+export const ALL_TALENT_NAMES = TALENTS.map((t) => t.name);
+
+export const TALENT_BY_NAME: Record<string, TalentDef> = Object.fromEntries(
+  TALENTS.map((t) => [t.name, t]),
+);
+
+export const TALENT_BY_ID: Record<string, TalentDef> = Object.fromEntries(
+  TALENTS.map((t) => [t.id, t]),
+);
+
+export const CATEGORY_COLORS: Record<TalentDef['category'], string> = {
+  hitting: 'text-sky-300',
+  pitching: 'text-amber-300',
+  fielding: 'text-emerald-300',
+  baserunning: 'text-violet-300',
+};
+
