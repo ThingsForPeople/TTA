@@ -78,3 +78,49 @@ export async function POST(req: Request) {
 
   return Response.json({ ok: true, merged: false });
 }
+
+export async function PUT(req: Request) {
+  const userId = await getUser();
+  if (!userId) return new Response('Unauthorized', { status: 401 });
+  if (!hasDb()) return Response.json({ ok: true });
+
+  const body = await req.json() as {
+    id: string;
+    sim: { con: number; pow: number; spd: number; fld: number; arm: number; pit: number; sta: number };
+    ovr: number;
+  };
+
+  if (!body.id || !body.sim || body.ovr == null) {
+    return Response.json({ error: 'Missing required fields' }, { status: 400 });
+  }
+
+  const result = await db
+    .update(statHistory)
+    .set({ sim: body.sim, ovr: body.ovr })
+    .where(and(eq(statHistory.id, body.id), eq(statHistory.userId, userId)));
+
+  const rowCount = (result as unknown as { rowCount?: number }).rowCount ?? 0;
+  if (rowCount === 0) {
+    return Response.json({ error: 'Not found' }, { status: 404 });
+  }
+
+  return Response.json({ ok: true });
+}
+
+export async function DELETE(req: Request) {
+  const userId = await getUser();
+  if (!userId) return new Response('Unauthorized', { status: 401 });
+  if (!hasDb()) return Response.json({ ok: true });
+
+  const { searchParams } = new URL(req.url);
+  const id = searchParams.get('id');
+  if (!id) {
+    return Response.json({ error: 'Missing id' }, { status: 400 });
+  }
+
+  await db
+    .delete(statHistory)
+    .where(and(eq(statHistory.id, id), eq(statHistory.userId, userId)));
+
+  return Response.json({ ok: true });
+}
