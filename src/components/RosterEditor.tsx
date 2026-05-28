@@ -15,7 +15,18 @@ import {
   type PlayerMetaStore,
   type SimStats,
 } from '../lib/playerMeta';
-import { getLatestDelta, getOvrSeries, recordSnapshot } from '../lib/statHistory';
+import {
+  getAllPlayerHistories,
+  getLatestDelta,
+  getOvrSeries,
+  recordSnapshot,
+  updateSnapshot,
+  deleteSnapshot,
+  updateSnapshotApi,
+  deleteSnapshotApi,
+  computeOvr,
+} from '../lib/statHistory';
+import { StatHistoryEditor } from './StatHistoryEditor';
 import { STANDALONE_TALENTS } from '../lib/talentClassify';
 import type { PitchTalent } from '../lib/playerMeta';
 import type { Player, Team } from '../lib/types';
@@ -30,6 +41,9 @@ interface Props {
 }
 
 export function RosterEditor({ team, metaStore, onChange }: Props) {
+  const [editingHistory, setEditingHistory] = useState<string | null>(null);
+  const [historyVersion, setHistoryVersion] = useState(0);
+
   const updatePlayer = (uuid: string, updater: (m: PlayerMeta) => PlayerMeta) => {
     const current = metaStore[uuid] ?? emptyMeta();
     const next = { ...metaStore, [uuid]: updater(current) };
@@ -105,6 +119,7 @@ export function RosterEditor({ team, metaStore, onChange }: Props) {
                   severity ? setInjury(m, severity, note) : clearInjury(m),
                 );
               }}
+              onEditHistory={() => setEditingHistory(player.uuid!)}
             />
           );
         })}
@@ -119,6 +134,30 @@ export function RosterEditor({ team, metaStore, onChange }: Props) {
           Clear all data
         </button>
       </div>
+
+      {editingHistory && (() => {
+        const histories = getAllPlayerHistories();
+        const snaps = histories[editingHistory];
+        const player = team.players.find((p) => p.uuid === editingHistory);
+        if (!snaps?.length || !player) return null;
+        return (
+          <StatHistoryEditor
+            player={player}
+            snapshots={snaps}
+            onClose={() => setEditingHistory(null)}
+            onUpdate={(snap, sim) => {
+              updateSnapshot(editingHistory, snap.timestamp, sim);
+              if (snap.id) updateSnapshotApi(snap.id, sim, computeOvr(sim));
+              setHistoryVersion((v) => v + 1);
+            }}
+            onDelete={(snap) => {
+              deleteSnapshot(editingHistory, snap.timestamp);
+              if (snap.id) deleteSnapshotApi(snap.id);
+              setHistoryVersion((v) => v + 1);
+            }}
+          />
+        );
+      })()}
     </section>
   );
 }
@@ -146,6 +185,7 @@ interface RowProps {
   onPitchTalentsChange: (pitchTalents: PitchTalent[]) => void;
   onHandednessChange: (bats: Hand | undefined, throws_: Hand | undefined) => void;
   onInjuryChange: (severity: InjurySeverity | undefined, note?: string) => void;
+  onEditHistory: () => void;
 }
 
 function PlayerRow({
@@ -159,6 +199,7 @@ function PlayerRow({
   onPitchTalentsChange,
   onHandednessChange,
   onInjuryChange,
+  onEditHistory,
 }: RowProps) {
   const [expanded, setExpanded] = useState(!hasData);
 
@@ -214,6 +255,21 @@ function PlayerRow({
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {player.uuid && <PlayerSparkline uuid={player.uuid} injury={injury?.severity} />}
+          {player.uuid && (
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(e) => { e.stopPropagation(); onEditHistory(); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); onEditHistory(); } }}
+              className="rounded p-0.5 text-slate-600 hover:text-slate-300"
+              aria-label={`Edit history for ${player.name}`}
+            >
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492ZM5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0Z" />
+                <path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.902 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319Zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 0 0 2.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 0 0 1.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 0 0-1.115 2.693l.16.291c.415.764-.42 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 0 0-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 0 0-2.692-1.115l-.292.16c-.764.415-1.6-.42-1.184-1.185l.159-.291a1.873 1.873 0 0 0-1.116-2.693l-.318-.094c-.835-.246-.835-1.428 0-1.674l.319-.094a1.873 1.873 0 0 0 1.115-2.692l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 0 0 2.692-1.116l.094-.318Z" />
+              </svg>
+            </span>
+          )}
           {ovr !== null && (
             <span className="font-mono text-xs text-slate-400">
               {ovr}
