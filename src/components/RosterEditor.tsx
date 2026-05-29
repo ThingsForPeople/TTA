@@ -33,6 +33,7 @@ import type { Player, Team } from '../lib/types';
 import { PitchTalentEditor } from './PitchTalentEditor';
 import { Sparkline } from './Sparkline';
 import { TalentPicker } from './TalentPicker';
+import { ZoneCoverage } from './ZoneCoverage';
 
 interface Props {
   team: Team;
@@ -254,6 +255,7 @@ function PlayerRow({
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          <ZoneCoverage talents={meta.talents} bats={meta.bats} />
           {player.uuid && <PlayerSparkline uuid={player.uuid} injury={injury?.severity} />}
           {player.uuid && (
             <span
