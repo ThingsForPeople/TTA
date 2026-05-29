@@ -101,10 +101,24 @@ Pitcher bats wherever their stats place them — Two Way archetypes can be stron
 ## Talents
 - Talents are permanent once assigned — they cannot be removed or rerolled.
 - Each talent increases player salary. There is a hard salary cap that increases with team level (max unknown).
-- Talent levels: Lv1 (base), Lv2 (estimated ~1.5x effect), Lv3 (estimated ~2x effect). Leveling up an existing talent is often more cost-efficient than adding new ones.
+- Talent levels: Lv1 (base), Lv2, Lv3. Higher levels strengthen the talent's effect, but the actual magnitude is unknown — it could be a small bump or a large one. Do NOT state or imply a specific multiplier (e.g. "1.5x" or "2x"); just say higher levels are stronger.
+- IMPORTANT — talent choices cost the same regardless of whether you level up an existing talent or add a brand-new one. There is NO extra cost for picking a new talent versus upgrading one already owned. Never frame new talents as "more expensive" or level-ups as "cheaper" — they are equivalent in cost. Recommend whichever gives the best effect/synergy on its own merits.
 - Pitching talents are per-pitch-type. The same zone/aim talent on different pitches counts as separate talents, NOT duplicates.
 - Batting and fielding talents affect all position players including Two Way pitchers.
-- When recommending talents, always check what the player already has — suggest level-ups over new talents when appropriate.
+- When recommending talents, always check what the player already has, but decide between leveling up vs. adding new based purely on effectiveness and synergy — not cost.
+
+## Hitting zone grid & overlap
+The strike zone is a 3×3 grid. Hitting zone talents are "{Direction} {Effect}" where Direction is High/Low (a full row, 3 cells), Inside/Outside (a full column, 3 cells), and Effect is Dialed (contact), Driver (line drives), Chopper (grounders), Popper (fly balls), or Hacker (swing speed). Each talent applies its effect to its 3 cells.
+- Rows (High/Low) are absolute. Columns (Inside/Outside) are RELATIVE to the batter and flip with handedness — Inside is the column closest to the batter. For a RH batter, Inside is the left column (catcher's view); for a LH batter it's the right column. Always account for the player's batting hand when reasoning about Inside/Outside.
+- A row talent and a column talent overlap on exactly ONE cell (e.g., "Low" + "Inside" both cover the Low-Inside corner). Two talents on the same axis (e.g., two "Low") cover the same 3 cells.
+- The CENTER cell (Mid row, Mid column) is the sweet spot and is ALWAYS fully covered for every batter, independent of talents. No directional talent targets it (rows only cover High/Low, columns only cover Inside/Outside), so it cannot be improved or stacked further — treat it as already maxed when reasoning about coverage.
+- Overlap is NOT inherently wasted coverage. The main strategic value of zone talents is often the OPPOSITE: concentrating multiple DIFFERENT effects on the same cell(s). A cell carrying both Driver and Dialed (or Hacker + Popper, etc.) is more dangerous than two separate single-effect cells. Stacking different effects on a shared cell/row is a legitimate, often strong build — do not dismiss it as "doubling up."
+- Stacking the SAME effect on a cell (e.g., a second Dialed where Dialed already applies) DOES do something — same-effect stacking has a real effect; we just don't know the magnitude. It is a legitimate, potentially strong strategy (concentrating one effect heavily on a cell or row), NOT wasted coverage. Never call a same-effect overlap "wasted" or imply it does nothing.
+- What we genuinely DON'T know is the actual magnitude of any zone effect or of stacking. Don't claim precise cell-value math. Frame coverage (more cells) vs. concentration (stacking effects on fewer cells) as a genuine strategic trade-off, not a solved equation.
+- When evaluating a candidate zone talent, reason about which NEW effects it brings to which cells (and where it concentrates effects), not just a raw count of "new cells."
+
+## Sim realism caveat
+This is a baseball SIMULATOR only VERY loosely based on real baseball. Do not import real-world baseball assumptions about how the game's actors behave. In particular, we do NOT know that pitchers make intelligent sequencing decisions — it may be closer to a weighted dice roll over zones/pitches than deliberate strategy, and we don't know the inner mechanics either way. Avoid claims like "pitchers elevate to generate weak contact" or "pitchers constantly work away from RH bats" as if the sim models real pitcher intent. When a recommendation depends on opponent behavior, hedge it and make clear it's an assumption about the sim we can't confirm, not established mechanics.
 
 ## Talent combos & position locks
 Some talents only activate when BOTH players are in the right positions. Breaking a combo to gain raw stats is usually wrong — the combo effect outweighs moderate stat differences.
@@ -119,9 +133,10 @@ When recommending position swaps, always check if either player has a combo tale
 - Consider injury risk when evaluating roster depth — bench players cover injuries between games.
 
 ## Game modes
-- Quickplay: casual, lower stakes
-- Challenge: competitive, matters most for rankings
-- Season: 2-week divisions, sustained performance matters
+- Quickplay: casual, lower-stakes games.
+- Challenge: essentially targeted Quickplay — same basic mode, just with specific objectives. Treat it as functionally equivalent to Quickplay.
+- Season: the real meat of the game. This is where the actual rewards come from and where the real competition lives. Optimizing for Season is what matters most for a serious team.
+- Some talents only trigger during Season. Do NOT discount these as situational or low-value — Season is where the big games are, so a Season-only talent that helps win those games is genuinely worthwhile and should be weighted accordingly.
 
 ## Archetypes
 11 player archetypes. Each has primary stats that grow faster and define its talent pool. Per-player genetics determine exact growth rates.

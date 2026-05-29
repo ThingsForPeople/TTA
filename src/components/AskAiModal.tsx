@@ -43,13 +43,16 @@ export function AskAiModal({ buildContext, buildCompactContext, teamUuid }: Prop
     return () => window.removeEventListener('keydown', onKey);
   }, [open]);
 
-  // Cancel any in-flight request when the modal is closed mid-stream.
+  // Abort an in-flight request only when the component fully unmounts (e.g.
+  // team change / navigation away) — NOT when the modal is merely closed.
+  // Closing the modal lets the request finish in the background; reopening
+  // shows the completed (or still-streaming) response.
   useEffect(() => {
-    if (!open && abortRef.current) {
-      abortRef.current.abort();
+    return () => {
+      abortRef.current?.abort();
       abortRef.current = null;
-    }
-  }, [open]);
+    };
+  }, []);
 
   // Scroll to bottom as a streaming response grows.
   useEffect(() => {
@@ -153,10 +156,17 @@ export function AskAiModal({ buildContext, buildCompactContext, teamUuid }: Prop
         type="button"
         onClick={() => setOpen(true)}
         className="fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white shadow-lg shadow-emerald-900/30 transition-colors hover:bg-emerald-500"
-        aria-label="Ask AI"
+        aria-label={loading ? 'Ask AI — response in progress' : 'Ask AI'}
       >
         <span aria-hidden="true">✦</span>
         Ask AI
+        {loading && (
+          <span
+            aria-hidden="true"
+            className="ml-0.5 h-2 w-2 animate-pulse rounded-full bg-white"
+            title="Response in progress…"
+          />
+        )}
       </button>
 
       {open ? (
