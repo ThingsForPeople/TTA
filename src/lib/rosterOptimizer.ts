@@ -81,9 +81,9 @@ export const DEFAULT_POSITION_IMPORTANCE: Record<string, number> = {
 // ── Fielding talent bonus system ─────────────────────────────────────
 // No raw defensive stats exist beyond sim stats, so fielding talents
 // have meaningful weight on position fit (~10-20 points per Lv1 talent).
-// Lv2 = 1.5x, Lv3 = 2x.
+// Lv2 = 1.25x, Lv3 = 1.5x (magnitude of level gains is unknown, kept conservative).
 
-const FIELDING_LEVEL_SCALE = [0, 1.0, 1.5, 2.0];
+const FIELDING_LEVEL_SCALE = [0, 1.0, 1.25, 1.5];
 
 const INFIELD_POSITIONS = new Set<FieldPosition>(['C', '1B', '2B', 'SS', '3B']);
 const OUTFIELD_POSITIONS = new Set<FieldPosition>(['LF', 'CF', 'RF']);
@@ -180,15 +180,18 @@ function comboBonus(
 
 export type StatWeights = Record<string, Record<string, number>>;
 
+// In-sim stat meanings: FLD = catch chance + throw-exchange (hands/transfer),
+// ARM = throw velocity, SPD = fielding range + baserunning. Each row sums to
+// 1.0 so positions stay comparable (baseScore = Σ statValue × weight).
 export const DEFAULT_STAT_WEIGHTS: StatWeights = {
-  SS:  { fld: 0.35, arm: 0.30, spd: 0.35 },
-  CF:  { fld: 0.25, arm: 0.20, spd: 0.55 },
-  '2B': { fld: 0.45, arm: 0.10, spd: 0.45 },
-  '3B': { fld: 0.35, arm: 0.45, spd: 0.20 },
-  RF:  { fld: 0.35, arm: 0.35, spd: 0.30 },
-  LF:  { fld: 0.35, arm: 0.20, spd: 0.45 },
-  C:   { fld: 0.35, arm: 0.50, spd: 0.15 },
-  '1B': { fld: 0.50, arm: 0.10, spd: 0.40 },
+  SS:  { fld: 0.35, arm: 0.30, spd: 0.35 }, // needs all three; long throws from the hole
+  CF:  { fld: 0.20, arm: 0.15, spd: 0.65 }, // range is the whole job
+  '2B': { fld: 0.45, arm: 0.10, spd: 0.45 }, // hands/exchange for the DP turn; short throws
+  '3B': { fld: 0.30, arm: 0.50, spd: 0.20 }, // hot corner; long throw across the diamond
+  RF:  { fld: 0.30, arm: 0.40, spd: 0.30 }, // strongest OF arm
+  LF:  { fld: 0.35, arm: 0.15, spd: 0.50 }, // range-first, weakest-arm OF spot
+  C:   { fld: 0.45, arm: 0.45, spd: 0.10 }, // receiving/blocking (FLD) + caught-stealing (ARM)
+  '1B': { fld: 0.55, arm: 0.05, spd: 0.40 }, // receiving/scooping; barely throws
 };
 
 const STAT_LABELS: Record<string, string> = { fld: 'FLD', arm: 'ARM', spd: 'SPD' };

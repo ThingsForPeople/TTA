@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { SIM_KEYS, SIM_LABELS, type SimStats } from '../lib/playerMeta';
+import { SIM_KEYS, SIM_LABELS, type PitchTalent, type SimStats } from '../lib/playerMeta';
+import { STANDALONE_TALENTS } from '../lib/talentClassify';
 import { TalentPicker } from './TalentPicker';
+import { PitchTalentEditor } from './PitchTalentEditor';
 import { Markdown } from './Markdown';
 import { RateLimitBadge } from './RateLimitBadge';
 import { readRateLimitBody, readRateLimitHeaders, useRateLimit } from '../hooks/useRateLimit';
@@ -15,6 +17,17 @@ interface Props {
 }
 
 const ZERO: SimStats = { con: 0, pow: 0, spd: 0, fld: 0, arm: 0, pit: 0, sta: 0 };
+
+// Display order for the recruit form — matches the in-game stat ordering shown
+// on other pages (POW, CON, SPD, STA, FLD, ARM, PIT), distinct from the
+// canonical SIM_KEYS order used for OVR math.
+const RECRUIT_STAT_ORDER: (keyof SimStats)[] = ['pow', 'con', 'spd', 'sta', 'fld', 'arm', 'pit'];
+
+// The 11 player archetypes (see system-prompt Archetypes section).
+const ARCHETYPES = [
+  'Slugger', 'Brute', 'Spark', 'Scout', 'Flash', 'Hawk',
+  'Gunner', 'Weaver', 'Ace', 'Two Way', 'Wildcard',
+];
 
 function computeOvr(sim: SimStats): number {
   const total = SIM_KEYS.reduce((sum, k) => sum + sim[k], 0);
@@ -32,13 +45,25 @@ const PROMPT_SUFFIX =
   '\n\nShould I pick up this player? Consider: where they\'d fit positionally, ' +
   'whether they improve on anyone currently in the lineup, what their OVR means ' +
   'given that PIT is wasted on non-pitchers, and whether they\'re worth the ' +
-  'training/injury maintenance cost. Be concise — bullets, not paragraphs.';
+  'training/injury maintenance cost.\n\n' +
+  'IMPORTANT — the salary cap has gone up, so I have more room than before. ' +
+  'Don\'t evaluate this recruit purely as a straight replacement for a current ' +
+  'starter; also weigh them as a potential longer-term add or depth piece worth ' +
+  'developing, even if they aren\'t an immediate upgrade.\n' +
+  'Age matters for the long view: players start as young as ~18 and retire around ' +
+  '~30, so a younger recruit has more seasons of useful service and more runway to ' +
+  'develop, while an older one is a shorter-term play. Factor the given age (if ' +
+  'provided) into how much long-term value they offer.\n\n' +
+  'Be concise — bullets, not paragraphs.';
 
 export function RecruitAnalyzer({ open, onClose, buildContext, buildCompactContext, teamUuid, inline }: Props) {
   const [name, setName] = useState('');
+  const [age, setAge] = useState('');
+  const [archetype, setArchetype] = useState('');
   const [sim, setSim] = useState<SimStats>({ ...ZERO });
   const [talents, setTalents] = useState<string[]>([]);
   const [talentLevels, setTalentLevels] = useState<Record<string, number>>({});
+  const [pitchTalents, setPitchTalents] = useState<PitchTalent[]>([]);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [status, setStatus] = useState<'idle' | 'streaming' | 'done' | 'error'>('idle');
   const abortRef = useRef<AbortController | null>(null);
@@ -65,8 +90,10 @@ export function RecruitAnalyzer({ open, onClose, buildContext, buildCompactConte
   const buildRecruitBlock = useCallback(() => {
     const lines = [
       name ? `**${name}**` : '(unnamed recruit)',
+      `Archetype: ${archetype || '(not provided)'}`,
+      age.trim() ? `Age: ${age.trim()}` : 'Age: (not provided)',
       `OVR: ${ovr}`,
-      SIM_KEYS.map((k) => `${SIM_LABELS[k]}=${sim[k]}`).join(' '),
+      RECRUIT_STAT_ORDER.map((k) => `${SIM_LABELS[k]}=${sim[k]}`).join(' '),
     ];
     if (talents.length) {
       const talentStr = talents.map((t) => {
@@ -75,8 +102,17 @@ export function RecruitAnalyzer({ open, onClose, buildContext, buildCompactConte
       }).join(', ');
       lines.push(`Talents: ${talentStr}`);
     }
+    if (pitchTalents.length) {
+      const pitchStr = pitchTalents.map((pt) => {
+        const subs = pt.sub.length
+          ? ` [${pt.sub.map((s) => `${s.name} Lv${s.level}`).join(', ')}]`
+          : '';
+        return `${pt.pitch} Lv${pt.level}${subs}`;
+      }).join('; ');
+      lines.push(`Pitches: ${pitchStr}`);
+    }
     return lines.join('\n');
-  }, [name, ovr, sim, talents, talentLevels]);
+  }, [name, age, archetype, ovr, sim, talents, talentLevels, pitchTalents]);
 
   const analyze = useCallback(async () => {
     abortRef.current?.abort();
@@ -139,9 +175,12 @@ export function RecruitAnalyzer({ open, onClose, buildContext, buildCompactConte
 
   const reset = () => {
     setName('');
+    setAge('');
+    setArchetype('');
     setSim({ ...ZERO });
     setTalents([]);
     setTalentLevels({});
+    setPitchTalents([]);
     setFeedback(null);
     setStatus('idle');
   };
@@ -181,19 +220,42 @@ export function RecruitAnalyzer({ open, onClose, buildContext, buildCompactConte
       </div>
 
       <div className="space-y-4">
-        <input
+        <div className="flex gap-2">
+          <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Player name (optional)"
-                className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-1.5 text-sm text-slate-100 placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none"
+                className="flex-1 rounded-md border border-slate-700 bg-slate-950 px-3 py-1.5 text-sm text-slate-100 placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none"
               />
+          <select
+                value={archetype}
+                onChange={(e) => setArchetype(e.target.value)}
+                title="Player archetype"
+                className="w-32 rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none"
+              >
+                <option value="">Archetype</option>
+                {ARCHETYPES.map((a) => (
+                  <option key={a} value={a}>{a}</option>
+                ))}
+              </select>
+          <input
+                type="number"
+                min={18}
+                max={40}
+                value={age}
+                onChange={(e) => setAge(e.target.value)}
+                placeholder="Age"
+                title="Players start as young as ~18 and retire around ~30"
+                className="w-20 rounded-md border border-slate-700 bg-slate-950 px-3 py-1.5 text-sm text-slate-100 placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none"
+              />
+        </div>
 
               <div>
                 <div className="mb-1 text-[10px] uppercase tracking-wider text-slate-500">
                   Sim stats
                 </div>
                 <div className="grid grid-cols-7 gap-1.5">
-                  {SIM_KEYS.map((k) => (
+                  {RECRUIT_STAT_ORDER.map((k) => (
                     <label key={k} className="flex flex-col text-center">
                       <span className="text-[10px] uppercase tracking-wider text-slate-500">
                         {SIM_LABELS[k]}
@@ -220,6 +282,13 @@ export function RecruitAnalyzer({ open, onClose, buildContext, buildCompactConte
                 onLevelChange={(t, lvl) =>
                   setTalentLevels((prev) => ({ ...prev, [t]: lvl }))
                 }
+                availableTalents={STANDALONE_TALENTS}
+                label="Talents (general)"
+              />
+
+              <PitchTalentEditor
+                pitchTalents={pitchTalents}
+                onChange={setPitchTalents}
               />
 
               <button

@@ -251,8 +251,10 @@ export function TalentAdvisor({ players, metaStore, buildContext, buildCompactCo
     opts.forEach((o, i) => lines.push(`${i + 1}. ${o}`));
     lines.push('');
     lines.push(
-      'Which talent should I pick? Note: options marked "LEVEL UP" are upgrades to existing talents (good!), ' +
-      'while "MAX LEVEL" means the talent cannot be leveled further (bad pick). ' +
+      'Which talent should I pick? Note: options marked "LEVEL UP" upgrade an existing talent, ' +
+      'while "MAX LEVEL" means the talent cannot be leveled further (not a valid pick). ' +
+      'All picks cost the same — leveling up an existing talent costs no more or less than adding a new one, ' +
+      'so judge purely on effect and synergy, not on whether it is a level-up vs. a new talent. ' +
       'Consider: synergy with existing talents and pitch repertoire, ' +
       "how it fits the player's position and stats, and whether any option is clearly better or worse. " +
       'Give a clear recommendation with reasoning. Be concise — bullets, not paragraphs.'
