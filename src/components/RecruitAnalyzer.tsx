@@ -53,7 +53,14 @@ const PROMPT_SUFFIX =
   'Age matters for the long view: players start as young as ~18 and retire around ' +
   '~30, so a younger recruit has more seasons of useful service and more runway to ' +
   'develop, while an older one is a shorter-term play. Factor the given age (if ' +
-  'provided) into how much long-term value they offer.\n\n' +
+  'provided) into how much long-term value they offer.\n' +
+  'Talent unlocks: when I recruit a player they unlock talents based on their own ' +
+  'randomized talent-unlock tiers, so the talents listed here (if any) are not the ' +
+  'final picture — recruiting them grants additional unlocks I can\'t fully see in ' +
+  'advance. Higher stat rolls / OVR tend to come with more (and earlier) unlock ' +
+  'tiers, so a strong recruit will likely deliver multiple talent unlocks, adding ' +
+  'upside beyond their raw stats. Factor this latent talent potential into the ' +
+  'evaluation, especially for high-stat recruits.\n\n' +
   'Be concise — bullets, not paragraphs.';
 
 export function RecruitAnalyzer({ open, onClose, buildContext, buildCompactContext, teamUuid, inline }: Props) {

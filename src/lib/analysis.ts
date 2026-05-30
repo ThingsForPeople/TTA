@@ -254,141 +254,179 @@ function pickHighest<T>(pool: T[], score: (x: T) => number | undefined): T | und
   return best;
 }
 
+// ── Slot scoring & global assignment ────────────────────────────────
+// Every player is scored against every slot (wOBA with role-specific tilts
+// plus talent bonuses), then we solve for the assignment that maximizes
+// TOTAL lineup fit. This replaces the old greedy fill, which decided #3
+// before #4 (so a high-wOBA bat got grabbed for #3 before cleanup was even
+// considered) and let raw wOBA override slot-locked talents. Talents whose
+// effect only works at one slot are hard-pinned there first.
+//
+// Scoring references: Tango/Lichtman/Dolphin "The Book", FanGraphs wOBA.
+
+const SLOT_ROLES: Record<number, BattingSlotRole> = {
+  1: 'leadoff', 2: 'quality', 3: 'best', 4: 'cleanup', 5: 'protection',
+  6: 'lower', 7: 'lower', 8: 'lower', 9: 'lower',
+};
+
+const SLOT_REASON: Record<number, string> = {
+  1: 'Leadoff — OBP-driven, low K%',
+  2: '#2 — wOBA + OBP tilt',
+  3: '#3 — highest wOBA',
+  4: '#4 — wOBA + ISO power',
+  5: '#5 — wOBA + contact',
+  6: '#6 — wOBA',
+  7: '#7 — wOBA',
+  8: '#8 — OBP, turns the order over',
+  9: '#9 — wOBA',
+};
+
+// Talents whose effect only functions at a specific slot, so the holder is
+// hard-pinned there — the talent is dead weight anywhere else. The Janitor's
+// power boost applies only "when batting cleanup".
+const SLOT_LOCKED_TALENTS: Record<string, number> = {
+  'The Janitor': 4,
+};
+
+// Fill priority for the greedy seed (refined afterward by 2-opt).
+const SLOT_SEED_PRIORITY = [3, 1, 2, 4, 5, 8, 6, 7, 9];
+
+function slotFit(p: Player, slot: number, ms: PlayerMetaStore): number {
+  const role = SLOT_ROLES[slot];
+  const tb = totalTalentBonus(p.uuid, ms, role);
+  const pr = profile(p);
+  if (!pr) return tb; // no stats yet → sorts to the bottom, still placeable
+  switch (slot) {
+    case 1: return pr.obp * WOBA_SCALE + 0.3 * pr.bbRate - 0.4 * pr.kRate + tb;
+    case 2: return pr.woba + 0.3 * pr.obp + tb;
+    case 4: return pr.woba + 0.4 * pr.isoP + tb;
+    case 5: return pr.woba - 0.4 * pr.kRate + tb;
+    case 8: return pr.obp - 0.3 * pr.kRate + tb;
+    default: return pr.woba + tb; // 3, 6, 7, 9
+  }
+}
+
 /**
- * Lineup construction using linear-weight wOBA and component rates.
+ * Lineup construction by global assignment.
  *
- * Slots filled in priority order (3 → 1 → 2 → 4 → 5 → 8 → 6/7/9) so each
- * role claims its best-fit player first. Pitchers compete freely (two-way
- * archetypes can be strong hitters).
- *
- * Scoring references: Tango/Lichtman/Dolphin "The Book", FanGraphs wOBA
- * methodology. Linear weights are from the 2024 MLB run environment.
+ * 1. Hard-pin slot-locked talents (e.g. The Janitor → cleanup).
+ * 2. Pick the best N hitters to fill N slots (pinned holders always play).
+ * 3. Seed an assignment greedily, then run 2-opt swaps to maximize total
+ *    lineup fit — and, when includeChain, adjacency bonuses from chain
+ *    talents (e.g. Rally Time) that boost the next batter.
  */
-export function recommendBattingOrder(team: Team, metaStore?: PlayerMetaStore): BattingOrderResult {
-  const ms = metaStore ?? {};
+function buildBattingOrder(
+  team: Team,
+  ms: PlayerMetaStore,
+  includeChain: boolean,
+): BattingOrderResult {
   const all = team.players ?? [];
   const benched = all.filter((p) => p.bench === true);
   const active = all.filter((p) => p.bench !== true);
+  if (active.length === 0) return { recommended: [], benched };
 
-  const isPitcher = (p: Player) =>
-    p.position === 'P' || p.position === 'SP' || p === team.pitcher;
+  const numSlots = Math.min(9, active.length);
+  const slotList: number[] = [];
+  for (let s = 1; s <= numSlots; s++) slotList.push(s);
 
-  const remaining = new Set(active);
-  const placed: { slot: number; player: Player; role: BattingSlotRole; reason: string }[] = [];
+  const hasTalent = (p: Player, t: string) =>
+    !!p.uuid && !!ms[p.uuid]?.talents?.includes(t);
 
-  const place = (
-    slot: number,
-    role: BattingSlotRole,
-    reason: string,
-    score: (p: Player) => number | undefined,
-  ) => {
-    const picked = pickHighest(Array.from(remaining), score);
-    if (picked) {
-      remaining.delete(picked);
-      placed.push({ slot, player: picked, role, reason });
+  // 1. Hard-pin slot-locked talents — best holder claims the locked slot.
+  const lockedHolders = new Map<number, Player>(); // slot → player
+  const lockedPlayers = new Set<Player>();
+  for (const [talent, slot] of Object.entries(SLOT_LOCKED_TALENTS)) {
+    if (slot > numSlots || lockedHolders.has(slot)) continue;
+    const holders = active.filter((p) => hasTalent(p, talent) && !lockedPlayers.has(p));
+    const best = pickHighest(holders, (p) => slotFit(p, slot, ms));
+    if (best) {
+      lockedHolders.set(slot, best);
+      lockedPlayers.add(best);
     }
+  }
+
+  // 2. Choose the lineup: locked holders always play; fill the rest by wOBA.
+  const wobaOf = (p: Player) => profile(p)?.woba ?? -1;
+  const starters: Player[] = [...lockedPlayers];
+  for (const p of active.filter((x) => !lockedPlayers.has(x)).sort((a, b) => wobaOf(b) - wobaOf(a))) {
+    if (starters.length >= numSlots) break;
+    starters.push(p);
+  }
+
+  // 3a. Seed: pins first, then greedy best-fit per slot in priority order.
+  const assign = new Map<number, Player>();
+  const used = new Set<Player>();
+  for (const [slot, p] of lockedHolders) { assign.set(slot, p); used.add(p); }
+  for (const slot of SLOT_SEED_PRIORITY) {
+    if (slot > numSlots || assign.has(slot)) continue;
+    const pick = pickHighest(starters.filter((p) => !used.has(p)), (p) => slotFit(p, slot, ms));
+    if (pick) { assign.set(slot, pick); used.add(pick); }
+  }
+  for (const slot of slotList) {
+    if (assign.has(slot)) continue;
+    const pick = starters.find((p) => !used.has(p));
+    if (pick) { assign.set(slot, pick); used.add(pick); }
+  }
+
+  // 3b. Objective = total slot fit (+ chain adjacency when requested).
+  const objective = (a: Map<number, Player>): number => {
+    let s = 0;
+    for (const [slot, p] of a) s += slotFit(p, slot, ms);
+    if (includeChain) {
+      const ordered = slotList.map((sl) => a.get(sl)).filter((p): p is Player => !!p);
+      for (let i = 0; i < ordered.length - 1; i++) s += chainBonus(ordered[i], ordered[i + 1], ms);
+      if (ordered.length === 9) s += chainBonus(ordered[8], ordered[0], ms); // #9 feeds #1
+    }
+    return s;
   };
 
-  // Slot 3: best overall hitter. Gets the most PAs with runners on base and
-  // more total PAs than #4 over a season (The Book, ch. 5).
-  place(3, 'best', '#3 — highest wOBA', (p) => {
-    const pr = profile(p);
-    return pr ? pr.woba + totalTalentBonus(p.uuid, ms, 'best') : undefined;
-  });
-
-  place(1, 'leadoff', 'Leadoff — OBP-driven, low K%', (p) => {
-    const pr = profile(p);
-    if (!pr) return undefined;
-    return pr.obp * WOBA_SCALE + 0.3 * pr.bbRate - 0.4 * pr.kRate + totalTalentBonus(p.uuid, ms, 'leadoff');
-  });
-
-  place(2, 'quality', '#2 — wOBA + OBP tilt', (p) => {
-    const pr = profile(p);
-    if (!pr) return undefined;
-    return pr.woba + 0.3 * pr.obp + totalTalentBonus(p.uuid, ms, 'quality');
-  });
-
-  place(4, 'cleanup', '#4 — wOBA + ISO power', (p) => {
-    const pr = profile(p);
-    if (!pr) return undefined;
-    return pr.woba + 0.4 * pr.isoP + totalTalentBonus(p.uuid, ms, 'cleanup');
-  });
-
-  place(5, 'protection', '#5 — wOBA + contact', (p) => {
-    const pr = profile(p);
-    if (!pr) return undefined;
-    return pr.woba - 0.4 * pr.kRate + totalTalentBonus(p.uuid, ms, 'protection');
-  });
-
-  // Fill 6-7-8-9: sort remaining by wOBA, then pick the best OBP from the
-  // bottom half for #8 ("second leadoff"). This prevents a strong hitter from
-  // being pulled down past weaker ones just because they also have good OBP.
-  const tailPool = Array.from(remaining).sort((a, b) => {
-    const pa = profile(a);
-    const pb = profile(b);
-    const ta = totalTalentBonus(a.uuid, ms, 'lower');
-    const tb = totalTalentBonus(b.uuid, ms, 'lower');
-    return ((pb?.woba ?? 0) + tb) - ((pa?.woba ?? 0) + ta);
-  });
-
-  let slot8Pick: Player | undefined;
-  if (tailPool.length >= 3) {
-    const bottomHalf = tailPool.slice(Math.floor(tailPool.length / 2));
-    slot8Pick = pickHighest(bottomHalf, (p) => {
-      const pr = profile(p);
-      if (!pr) return undefined;
-      return pr.obp - 0.3 * pr.kRate + totalTalentBonus(p.uuid, ms, 'lower');
-    });
-  }
-
-  let nextSlot = 6;
-  for (const p of tailPool) {
-    if (nextSlot > 9) break;
-    if (p === slot8Pick) continue;
-    if (nextSlot === 8) {
-      if (slot8Pick) {
-        placed.push({ slot: 8, player: slot8Pick, role: 'lower', reason: '#8 — OBP, turns order over' });
-        remaining.delete(slot8Pick);
+  // 3c. 2-opt: swap non-locked slot pairs while the total improves. This
+  //     repairs the compounding errors of a one-pass greedy fill.
+  const lockedSlots = new Set(lockedHolders.keys());
+  let best = objective(assign);
+  let improved = true;
+  let guard = 0;
+  while (improved && guard++ < 50) {
+    improved = false;
+    for (let i = 0; i < slotList.length; i++) {
+      for (let j = i + 1; j < slotList.length; j++) {
+        const si = slotList[i], sj = slotList[j];
+        if (lockedSlots.has(si) || lockedSlots.has(sj)) continue;
+        const pi = assign.get(si), pj = assign.get(sj);
+        if (!pi || !pj) continue;
+        assign.set(si, pj); assign.set(sj, pi);
+        const cand = objective(assign);
+        if (cand > best + 1e-9) { best = cand; improved = true; }
+        else { assign.set(si, pi); assign.set(sj, pj); } // revert
       }
-      nextSlot++;
-    }
-    if (nextSlot > 9) break;
-    placed.push({ slot: nextSlot, player: p, role: 'lower', reason: `#${nextSlot} — wOBA` });
-    remaining.delete(p);
-    nextSlot++;
-  }
-  if (slot8Pick && !placed.some((x) => x.player === slot8Pick)) {
-    if (!placed.some((x) => x.slot === 8)) {
-      placed.push({ slot: 8, player: slot8Pick, role: 'lower', reason: '#8 — OBP, turns order over' });
-      remaining.delete(slot8Pick);
     }
   }
 
-  // Backfill any skipped slots — happens when stats were missing for the
-  // criteria that slot relies on (e.g. brand-new team with no SLG anywhere).
-  const usedSlots = new Set(placed.map((x) => x.slot));
-  const placedPlayers = new Set(placed.map((x) => x.player));
-  const leftovers = active.filter((p) => !placedPlayers.has(p));
-  for (let s = 1; s <= 9; s++) {
-    if (usedSlots.has(s)) continue;
-    const next = leftovers.shift();
-    if (!next) break;
-    placed.push({ slot: s, player: next, role: 'lower', reason: '' });
-    usedSlots.add(s);
-  }
-
-  placed.sort((a, b) => a.slot - b.slot);
-
-  const recommended: BattingSlot[] = placed.map((x) => ({
-    slot: x.slot,
-    player: x.player,
-    currentSlot: x.player.battingOrder,
-    moved: x.player.battingOrder !== undefined && x.player.battingOrder !== x.slot,
-    role: x.role,
-    reason: x.reason,
-  }));
+  const recommended: BattingSlot[] = slotList
+    .filter((slot) => assign.has(slot))
+    .map((slot) => {
+      const player = assign.get(slot)!;
+      let reason = SLOT_REASON[slot];
+      for (const [talent, lockedSlot] of Object.entries(SLOT_LOCKED_TALENTS)) {
+        if (lockedSlot === slot && hasTalent(player, talent)) {
+          reason = `#${slot} — ${talent} (talent locks here)`;
+        }
+      }
+      return {
+        slot,
+        player,
+        currentSlot: player.battingOrder,
+        moved: player.battingOrder !== undefined && player.battingOrder !== slot,
+        role: SLOT_ROLES[slot],
+        reason,
+      };
+    });
 
   return { recommended, benched };
+}
+
+export function recommendBattingOrder(team: Team, metaStore?: PlayerMetaStore): BattingOrderResult {
+  return buildBattingOrder(team, metaStore ?? {}, false);
 }
 
 // ── Chain talents: batter N's talent boosts batter N+1 ──
@@ -425,63 +463,8 @@ function chainBonus(
   return bonus;
 }
 
-function totalChainScore(order: BattingSlot[], ms: PlayerMetaStore): number {
-  let score = 0;
-  for (let i = 0; i < order.length - 1; i++) {
-    score += chainBonus(order[i].player, order[i + 1].player, ms);
-  }
-  // Wrap-around: #9 feeds into #1
-  if (order.length === 9) {
-    score += chainBonus(order[8].player, order[0].player, ms);
-  }
-  return score;
-}
-
 export function recommendSynergyBattingOrder(team: Team, metaStore?: PlayerMetaStore): BattingOrderResult {
-  const base = recommendBattingOrder(team, metaStore);
-  const ms = metaStore ?? {};
-  if (base.recommended.length < 2) return base;
-
-  const order = [...base.recommended];
-  let bestChain = totalChainScore(order, ms);
-  let improved = true;
-
-  while (improved) {
-    improved = false;
-    for (let i = 0; i < order.length; i++) {
-      for (let j = i + 1; j < order.length; j++) {
-        const swapped = [...order];
-        swapped[i] = { ...order[j], slot: order[i].slot, role: order[i].role, reason: order[i].reason };
-        swapped[j] = { ...order[i], slot: order[j].slot, role: order[j].role, reason: order[j].reason };
-
-        // Recalculate individual slot talent bonuses after swap
-        const oldSlotScore =
-          totalTalentBonus(order[i].player.uuid, ms, order[i].role as SlotRole) +
-          totalTalentBonus(order[j].player.uuid, ms, order[j].role as SlotRole);
-        const newSlotScore =
-          totalTalentBonus(swapped[i].player.uuid, ms, swapped[i].role as SlotRole) +
-          totalTalentBonus(swapped[j].player.uuid, ms, swapped[j].role as SlotRole);
-
-        const newChain = totalChainScore(swapped, ms);
-        const net = (newChain - bestChain) + (newSlotScore - oldSlotScore);
-
-        if (net > 0.001) {
-          order[i] = swapped[i];
-          order[j] = swapped[j];
-          bestChain = newChain;
-          improved = true;
-        }
-      }
-    }
-  }
-
-  const recommended = order.map((s) => ({
-    ...s,
-    currentSlot: s.player.battingOrder,
-    moved: s.player.battingOrder !== undefined && s.player.battingOrder !== s.slot,
-  }));
-
-  return { recommended, benched: base.benched };
+  return buildBattingOrder(team, metaStore ?? {}, true);
 }
 
 export interface ColumnExtremes {
