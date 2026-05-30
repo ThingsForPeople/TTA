@@ -256,7 +256,7 @@ function PlayerRow({
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <ZoneCoverage talents={meta.talents} bats={meta.bats} />
-          {player.uuid && <PlayerSparkline uuid={player.uuid} injury={injury?.severity} />}
+          {player.uuid && <PlayerSparkline uuid={player.uuid} />}
           {player.uuid && (
             <span
               role="button"
@@ -274,8 +274,11 @@ function PlayerRow({
           )}
           {ovr !== null && (
             <span className="font-mono text-xs text-slate-400">
-              {ovr}
-              {effOvr !== null && <span className="text-red-400/70"> ({effOvr})</span>}
+              {effOvr !== null ? (
+                <span className="text-red-400/70">{effOvr}</span>
+              ) : (
+                ovr
+              )}
             </span>
           )}
           {hasData ? (
@@ -486,24 +489,15 @@ function clamp(n: number): number {
   return Math.round(n);
 }
 
-function PlayerSparkline({ uuid, injury }: { uuid: string; injury?: InjurySeverity }) {
+function PlayerSparkline({ uuid }: { uuid: string }) {
   const series = getOvrSeries(uuid);
   const delta = getLatestDelta(uuid);
 
-  if (series.length < 2 && !injury) return null;
-
-  const dotColor = injury
-    ? injury === 'minor'
-      ? 'bg-yellow-400'
-      : injury === 'major'
-        ? 'bg-orange-400'
-        : 'bg-red-400'
-    : undefined;
+  if (series.length < 2) return null;
 
   return (
     <div className="flex items-center gap-1.5">
-      {dotColor && <span className={`inline-block h-1.5 w-1.5 rounded-full ${dotColor}`} />}
-      {series.length >= 2 && <Sparkline values={series.map((s) => s.ovr)} />}
+      <Sparkline values={series.map((s) => s.ovr)} />
       {delta && (
         <span
           className={
