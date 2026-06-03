@@ -1,5 +1,6 @@
 import type { PlayerMetaStore } from './playerMeta';
 import type { Player, Team } from './types';
+import { ZONE_HIT_EFFECT, type ZoneHitEffect } from './talentEffects';
 
 export type BattingSlotRole =
   | 'leadoff'
@@ -96,7 +97,7 @@ interface TalentValue {
   global?: number;
 }
 
-const TALENT_VALUES: Record<string, TalentValue> = {
+export const TALENT_VALUES: Record<string, TalentValue> = {
   // ── Slot-specific talents — strong affinity for their named role,
   //    penalty elsewhere so they aren't grabbed by earlier picks ──
   'Table Setter':       { roles: { leadoff: 0.08, quality: -0.04, best: -0.06, cleanup: -0.06, protection: -0.04, lower: -0.02 } },
@@ -147,15 +148,36 @@ const TALENT_VALUES: Record<string, TalentValue> = {
   'Zone Hacker':        { roles: { cleanup: 0.02, best: 0.01 }, global: 0.01 },
 };
 
-// Directional zone talents get a tiny global bonus
-const ZONE_DIR_EFFECTS = ['Dialed', 'Driver', 'Chopper', 'Popper', 'Hacker'];
+// Role tilts per directional-zone effect family. The effect word (Driver,
+// Dialed, …) — not the High/Low/Inside/Outside prefix — sets the offensive
+// character, because the prefix only changes WHICH cells get the effect, while
+// the effect word maps to the engine stat (see ZONE_HIT_EFFECT in talentEffects).
+const ZONE_EFFECT_ROLES: Record<ZoneHitEffect, Partial<Record<SlotRole, number>>> = {
+  Driver:  { best: 0.03, cleanup: 0.03, quality: 0.02 }, // line drives → hits
+  Dialed:  { leadoff: 0.02, quality: 0.02 },             // contact → on-base/early order
+  Popper:  { cleanup: 0.03, protection: 0.02 },          // fly balls → power/HR
+  Chopper: { leadoff: 0.02 },                            // grounders → speed beats the throw
+  Hacker:  {},                                           // raw aggression, double-edged → no slot lean
+};
+
+// Directional zone talents ("High Driver", "Inside Popper", …) are differentiated
+// by their effect family's batted-ball outcome rank instead of a flat bonus, so a
+// line-drive Driver outweighs a swing-only Hacker as a lineup tiebreaker.
 const ZONE_DIR_PREFIXES = ['High', 'Low', 'Inside', 'Outside'];
+// Names of the directional zone talents. They influence slot SCORING but are
+// hidden from the displayed "synergies" list — every hitter tends to carry
+// several, so they'd drown out the meaningful slot-defining talents.
+const ZONE_DIR_TALENT_NAMES = new Set<string>();
 for (const prefix of ZONE_DIR_PREFIXES) {
-  for (const effect of ZONE_DIR_EFFECTS) {
+  for (const effect of Object.keys(ZONE_HIT_EFFECT) as ZoneHitEffect[]) {
     const name = `${prefix} ${effect}`;
-    if (!TALENT_VALUES[name]) {
-      TALENT_VALUES[name] = { roles: {}, global: 0.015 };
-    }
+    ZONE_DIR_TALENT_NAMES.add(name);
+    if (TALENT_VALUES[name]) continue;
+    const { rank } = ZONE_HIT_EFFECT[effect];
+    TALENT_VALUES[name] = {
+      roles: ZONE_EFFECT_ROLES[effect],
+      global: 0.008 + 0.004 * rank, // Driver 0.028 … Hacker 0.012
+    };
   }
 }
 
@@ -185,7 +207,7 @@ function talentBonus(
 
 // ── Baserunning talent bonuses ──
 // Stealing/speed talents get a bonus for leadoff and top-of-order slots
-const BASERUNNING_VALUES: Record<string, Partial<Record<SlotRole, number>>> = {
+export const BASERUNNING_VALUES: Record<string, Partial<Record<SlotRole, number>>> = {
   'Thief':              { leadoff: 0.06, quality: 0.03 },
   'Quick Silver':       { leadoff: 0.04, quality: 0.02 },
   'Evasive':            { leadoff: 0.03, quality: 0.02 },
@@ -228,6 +250,9 @@ export function getSlotTalents(
   if (!meta?.talents?.length) return [];
   const matched: string[] = [];
   for (const talentName of meta.talents) {
+    // Directional zone talents still affect scoring, but they're too numerous
+    // and generic to belong in the surfaced synergy list.
+    if (ZONE_DIR_TALENT_NAMES.has(talentName)) continue;
     const tv = TALENT_VALUES[talentName];
     const rv = BASERUNNING_VALUES[talentName];
     const hasRole = tv?.roles[role as SlotRole] && tv.roles[role as SlotRole]! > 0;
@@ -312,13 +337,12 @@ function slotFit(p: Player, slot: number, ms: PlayerMetaStore): number {
  * 1. Hard-pin slot-locked talents (e.g. The Janitor → cleanup).
  * 2. Pick the best N hitters to fill N slots (pinned holders always play).
  * 3. Seed an assignment greedily, then run 2-opt swaps to maximize total
- *    lineup fit — and, when includeChain, adjacency bonuses from chain
- *    talents (e.g. Rally Time) that boost the next batter.
+ *    lineup fit. Talent value (including slot-affinity bonuses) is already
+ *    baked into slotFit, so this single pass is the only recommendation.
  */
 function buildBattingOrder(
   team: Team,
   ms: PlayerMetaStore,
-  includeChain: boolean,
 ): BattingOrderResult {
   const all = team.players ?? [];
   const benched = all.filter((p) => p.bench === true);
@@ -368,15 +392,10 @@ function buildBattingOrder(
     if (pick) { assign.set(slot, pick); used.add(pick); }
   }
 
-  // 3b. Objective = total slot fit (+ chain adjacency when requested).
+  // 3b. Objective = total slot fit (talent value is already inside slotFit).
   const objective = (a: Map<number, Player>): number => {
     let s = 0;
     for (const [slot, p] of a) s += slotFit(p, slot, ms);
-    if (includeChain) {
-      const ordered = slotList.map((sl) => a.get(sl)).filter((p): p is Player => !!p);
-      for (let i = 0; i < ordered.length - 1; i++) s += chainBonus(ordered[i], ordered[i + 1], ms);
-      if (ordered.length === 9) s += chainBonus(ordered[8], ordered[0], ms); // #9 feeds #1
-    }
     return s;
   };
 
@@ -426,45 +445,7 @@ function buildBattingOrder(
 }
 
 export function recommendBattingOrder(team: Team, metaStore?: PlayerMetaStore): BattingOrderResult {
-  return buildBattingOrder(team, metaStore ?? {}, false);
-}
-
-// ── Chain talents: batter N's talent boosts batter N+1 ──
-const CHAIN_TALENTS: Record<string, { nextPrefers: 'power' | 'contact' | 'any' }> = {
-  'Rally Time':        { nextPrefers: 'power' },
-  'Clutch Cascade':    { nextPrefers: 'any' },
-  'Confidence Shaker': { nextPrefers: 'any' },
-};
-
-function chainBonus(
-  currentPlayer: Player,
-  nextPlayer: Player,
-  ms: PlayerMetaStore,
-): number {
-  const meta = currentPlayer.uuid ? ms[currentPlayer.uuid] : undefined;
-  if (!meta?.talents?.length) return 0;
-
-  let bonus = 0;
-  for (const talentName of meta.talents) {
-    const chain = CHAIN_TALENTS[talentName];
-    if (!chain) continue;
-    const lvl = meta.talentLevels?.[talentName] ?? 1;
-    const scale = LEVEL_SCALE[Math.min(lvl, 3)] ?? 1;
-
-    const nextProfile = profile(nextPlayer);
-    let fit = 0.03;
-    if (nextProfile && chain.nextPrefers === 'power') {
-      fit = 0.03 + 0.03 * Math.min(nextProfile.isoP / 0.200, 1);
-    } else if (nextProfile && chain.nextPrefers === 'contact') {
-      fit = 0.03 + 0.03 * (1 - nextProfile.kRate);
-    }
-    bonus += fit * scale;
-  }
-  return bonus;
-}
-
-export function recommendSynergyBattingOrder(team: Team, metaStore?: PlayerMetaStore): BattingOrderResult {
-  return buildBattingOrder(team, metaStore ?? {}, true);
+  return buildBattingOrder(team, metaStore ?? {});
 }
 
 export interface ColumnExtremes {

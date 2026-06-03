@@ -8,7 +8,13 @@ const LIMITS: Record<string, number> = {
   insight: 3,
   recruit: 3,
   'talent-advisor': 5,
+  'game-analysis': 10,     // single-game AI analysis (one model call each)
+  'matchup-analysis': 5,   // multi-game AI analysis (heavier: also fetches several replays)
 };
+
+// Fail CLOSED: any action that reaches here without an explicit limit still gets
+// a conservative cap, so a new/allowlisted action can never be silently unlimited.
+const DEFAULT_LIMIT = 5;
 
 export interface RateLimitResult {
   ok: boolean;
@@ -23,11 +29,9 @@ export async function checkRateLimit(
   actionType: string,
   userInfo?: { email?: string | null; name?: string | null },
 ): Promise<RateLimitResult> {
-  const limit = LIMITS[actionType];
+  const limit = LIMITS[actionType] ?? DEFAULT_LIMIT;
   const windowStart = new Date(Date.now() - WINDOW_MS);
   const resetsAt = Date.now() + WINDOW_MS;
-
-  if (!limit) return { ok: true, remaining: -1, resetsAt };
 
   if (process.env.NODE_ENV === 'development' || !hasDb()) {
     return { ok: true, remaining: limit, resetsAt };

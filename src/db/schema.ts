@@ -1,4 +1,5 @@
 import { index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import type { PlayerGameMetrics } from '../lib/parseReplay';
 
 export const users = pgTable('users', {
   id: text('id').primaryKey(),
@@ -37,6 +38,8 @@ export const playerMeta = pgTable('player_meta', {
   }[]>(),
   bats: text('bats').$type<'R' | 'L'>(),
   throws: text('throws').$type<'R' | 'L'>(),
+  archetype: text('archetype'),
+  age: integer('age'),
   updatedAt: timestamp('updated_at').defaultNow(),
 }, (t) => [
   uniqueIndex('player_meta_user_player').on(t.userId, t.playerUuid),
@@ -76,6 +79,42 @@ export const positionWeights = pgTable('position_weights', {
   updatedAt: timestamp('updated_at').defaultNow(),
 }, (t) => [
   uniqueIndex('position_weights_user_team').on(t.userId, t.teamUuid),
+]);
+
+// Marks a (user, team, game) replay as processed so incremental syncs skip it,
+// even if the game produced no metric rows for our players.
+export const replaySyncs = pgTable('replay_syncs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id),
+  teamUuid: text('team_uuid').notNull(),
+  gameId: text('game_id').notNull(),
+  completedAt: timestamp('completed_at'),
+  gameMode: text('game_mode'),
+  opponentName: text('opponent_name'),
+  syncedAt: timestamp('synced_at').defaultNow(),
+}, (t) => [
+  uniqueIndex('replay_syncs_user_team_game').on(t.userId, t.teamUuid, t.gameId),
+  index('replay_syncs_user_team').on(t.userId, t.teamUuid),
+]);
+
+// Per-player per-game derived metrics from a parsed replay. Counting stats only
+// (averages derived at query time) so they aggregate cleanly across games.
+export const replayMetrics = pgTable('replay_metrics', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id),
+  teamUuid: text('team_uuid').notNull(),
+  gameId: text('game_id').notNull(),
+  playerId: text('player_id').notNull(),
+  playerName: text('player_name').notNull(),
+  position: integer('position'),
+  completedAt: timestamp('completed_at'),
+  gameMode: text('game_mode'),
+  metrics: jsonb('metrics').notNull().$type<PlayerGameMetrics>(),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (t) => [
+  uniqueIndex('replay_metrics_user_team_game_player').on(t.userId, t.teamUuid, t.gameId, t.playerId),
+  index('replay_metrics_user_team').on(t.userId, t.teamUuid),
+  index('replay_metrics_user_team_player').on(t.userId, t.teamUuid, t.playerId),
 ]);
 
 export const usage = pgTable('usage', {

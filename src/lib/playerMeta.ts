@@ -45,6 +45,37 @@ export interface PlayerMeta {
   injuryHistory?: InjuryRecord[];
   bats?: Hand;
   throws?: Hand;
+  // Manual archetype override (the scraped roster may not include it). Used to
+  // unlock pitch-talent editing for pitcher archetypes — see isPitcherArchetype.
+  archetype?: string;
+  // Manual age entry — NOT in the scraped roster feed. Powers retirement/
+  // succession reasoning (players start ~18, retire ~30) in the AI advisors.
+  age?: number;
+}
+
+// The 11 player archetypes (see the system prompt's Archetypes section).
+export const ARCHETYPES = [
+  'Slugger', 'Brute', 'Spark', 'Scout', 'Flash', 'Hawk',
+  'Gunner', 'Weaver', 'Ace', 'Two Way', 'Wildcard',
+] as const;
+
+// Archetypes that pitch: they can carry pitch talents even when not listed at
+// P (e.g. a Two Way playing a field position, or a bench arm).
+export const PITCHER_ARCHETYPES = new Set<string>(['Ace', 'Gunner', 'Weaver', 'Two Way']);
+
+// The scraped roster reports archetype lowercase (e.g. "scout", "two way"),
+// while our canonical list is title-case. Normalize case/spacing to the
+// canonical ARCHETYPES entry so scraped values match the dropdown and the
+// pitcher-archetype gating. Returns undefined for unknown/empty input.
+export function normalizeArchetype(raw?: string | null): string | undefined {
+  if (!raw) return undefined;
+  const key = raw.replace(/[^a-z]/gi, '').toLowerCase();
+  return ARCHETYPES.find((a) => a.replace(/[^a-z]/gi, '').toLowerCase() === key);
+}
+
+export function isPitcherArchetype(archetype?: string | null): boolean {
+  const canon = normalizeArchetype(archetype);
+  return !!canon && PITCHER_ARCHETYPES.has(canon);
 }
 
 export type PlayerMetaStore = Record<string /* player uuid */, PlayerMeta>;

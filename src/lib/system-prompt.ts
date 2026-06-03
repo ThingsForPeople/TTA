@@ -1,4 +1,14 @@
 import { ALL_TALENTS } from './talents';
+import { ENGINE_STAT_GLOSSARY } from './talentEffects';
+
+// Engine "levers" observed in replay data — the internal stats the simulation
+// actually rolls against (distinct from the 7 displayed sim stats). Lets the AI
+// reason in the game's own mechanics. We know WHICH lever a talent moves and the
+// direction, but NOT the magnitude — keep that caveat intact downstream.
+function buildEngineLevers(): string {
+  const lines = Object.entries(ENGINE_STAT_GLOSSARY).map(([k, v]) => `- \`${k}\`: ${v}`);
+  return lines.join('\n');
+}
 
 function buildFullTalentReference(): string {
   const grouped: Record<string, { name: string; description: string }[]> = {};
@@ -60,6 +70,11 @@ Each player has 7 stats (0–100):
 - PIT (Pitching): Pitching accuracy and movement (pitchers only)
 - STA (Stamina): Energy recovery only — no in-game simulation impact. Higher STA = faster energy regen for training.
 
+## Engine levers (observed from replay data)
+Beneath the 7 sim stats, the simulation rolls against these internal "levers". Talents and sim stats ultimately push on them. This tells you WHICH lever something moves and the direction — NOT the magnitude (unknown). Use these names when explaining WHY a talent or stat helps; never attach a number to them.
+${buildEngineLevers()}
+- A talent's engine effect is its PAYOFF and can differ from its TRIGGER (e.g. "Pressure Cooker" pays off as line drives + power, but only after building charges on outs with runners on — so it's still a runners-on, middle-of-order talent).
+
 ## Positions & defensive fit
 Position scoring is based on weighted sim stats. Defense-critical positions are filled first, least demanding last (SS → CF → 2B → 3B → RF → LF → 1B → C):
 - SS: FLD primary (catch + exchange), ARM strong (longest infield throw, from the hole to 1B), SPD for range.
@@ -93,6 +108,7 @@ Pitcher bats wherever their stats place them — Two Way archetypes can be stron
 ## Training
 - Managers allocate 10 training points per day across various training categories. More points in a category = more XP in related stats, but XP gains don't always translate to stat increases.
 - Training fires daily at 10 AM ET.
+- Observed daily gains (approximate, varies by player/genetics): typically 0–2 points in each category per tick, ~5–7 total stat points per day spread across all categories. That's roughly +0.7–1.0 OVR per day, on the order of ~+5–7 OVR over a full week. Many ticks add 0 in a given category (XP doesn't always convert), and gains slow as a stat climbs.
 - Each player has hidden per-stat growth rates (genetics) set at creation. Primary archetype stats tend to grow faster, but individual players vary.
 - If certain stats train noticeably faster than others, that reveals the player's genetic strengths.
 - "Breaking the mould": players can randomly generate with higher potential in stats outside their archetype norms.
@@ -131,6 +147,13 @@ When recommending position swaps, always check if either player has a combo tale
 - Salary cap constrains roster depth. More talents = higher salary per player.
 - Bench optimization: identify where bench players would outscore starters, but keep starting lineup stable.
 - Consider injury risk when evaluating roster depth — bench players cover injuries between games.
+
+## Aging, retirement & succession
+- Players age over time. They start as young as ~18; useful service runs out and retirement happens around ~30. (Retirement is becoming an explicit game mechanic — plan for it now even where it isn't fully enforced yet.) A younger player has more seasons of value AND more runway to develop; an older one is a shorter-term play even if his current stats are better.
+- Aging cadence: a player's age increments by ~1 year every WEEK, at the Tuesday reset (not daily). So the ~18→~30 span is only ~12 weeks of real time — careers are short and the clock moves fast. Each week before that tick, training adds very roughly +5–7 OVR (see Training; diminishing as stats rise). Net: a developing player gains ~+5–7 OVR per +1 year of age, so judge a prospect by how many age-years of runway remain before ~30 × that per-year gain, against the incumbent's own decline. Because aging is this fast, the recruit-tab LOCK (freezes aging entirely) is genuinely valuable: you can stash a young prospect without burning their short clock, then unlock and develop them when a slot is about to open. (If a manager's observed aging rate differs from ~1 yr/week, defer to what they tell you.)
+- Stats improve through training (10 points/day), so "leveling a player up" is a multi-season investment. The worth of that investment is about CEILING and TIME, not current OVR: a young player with archetype-primary stats, strong rolls, and latent talent unlocks is worth developing even if he's not an upgrade today; an older player near his ceiling is not, even if he looks good now.
+- **Lock mechanic (recruit tab)**: a recruit you "lock" does NOT age while locked. This lets you stash a young, high-ceiling prospect indefinitely with zero aging/decline, then unlock and train him later as a planned replacement — e.g. hold him for N years until the incumbent at his position declines or retires, then promote and develop him into the role.
+- **Succession planning**: tie roster decisions to WHO a player replaces and WHEN. Map a prospect to the incumbent(s) at his best position(s), and reason about the timeline (incumbent decline/retirement vs. how long the prospect needs to develop). Ages are NOT in the scraped feed — they appear only when the manager has entered them manually (shown as "Age: N" on a player's line). Use the ages that are present; when replacement TIMING hinges on an incumbent whose age isn't shown, name that player and ask the manager for it rather than guessing.
 
 ## Game modes
 - Quickplay: casual, lower-stakes games.

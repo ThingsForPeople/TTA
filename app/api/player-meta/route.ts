@@ -29,6 +29,8 @@ export async function GET(req: Request) {
     pitchTalents?: typeof rows[0]['pitchTalents'];
     bats?: 'R' | 'L';
     throws?: 'R' | 'L';
+    archetype?: string;
+    age?: number;
   }> = {};
 
   for (const row of rows) {
@@ -41,6 +43,8 @@ export async function GET(req: Request) {
       pitchTalents: row.pitchTalents ?? undefined,
       bats: row.bats ?? undefined,
       throws: row.throws ?? undefined,
+      archetype: row.archetype ?? undefined,
+      age: row.age ?? undefined,
     };
   }
 
@@ -62,6 +66,8 @@ export async function PUT(req: Request) {
     pitchTalents?: { pitch: string; level: number; sub: { name: string; level: number }[] }[];
     bats?: 'R' | 'L' | null;
     throws?: 'R' | 'L' | null;
+    archetype?: string | null;
+    age?: number | null;
   };
 
   if (!body.playerUuid || !body.sim || !body.talents) {
@@ -110,6 +116,8 @@ export async function PUT(req: Request) {
       pitchTalents: body.pitchTalents ?? [],
       bats: body.bats ?? null,
       throws: body.throws ?? null,
+      archetype: body.archetype ?? null,
+      age: body.age ?? null,
     })
     .onConflictDoUpdate({
       target: [playerMeta.userId, playerMeta.playerUuid],
@@ -122,6 +130,8 @@ export async function PUT(req: Request) {
         pitchTalents: body.pitchTalents ?? [],
         bats: body.bats ?? null,
         throws: body.throws ?? null,
+        archetype: body.archetype ?? null,
+        age: body.age ?? null,
         updatedAt: new Date(),
       },
     });

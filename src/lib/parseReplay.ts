@@ -1,0 +1,1005 @@
+// Replay evaluator — turns the raw Tiny Teams replay JSON
+// (GET /api/replay/:gameId, ~2.8 MB) into a compact, team-oriented evaluation.
+// Parsed server-side so the client only receives the small summary.
+//
+// The replay is a deterministic event log. Each "pitch" segment carries one
+// pitch.thrown plus the batter's reaction; the at-bat's outcome lands in a
+// following "post" segment as batter.result. We join them by metadata.atBatId.
+// See talentEffects.ts / CLAUDE.md for the broader replay schema.
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+export interface BbMix {
+  ground: number;
+  line: number;
+  fly: number;
+  popup: number;
+}
+
+export interface BatterEval {
+  playerId: string;
+  name: string;
+  bats?: string;
+  pa: number;
+  battedBalls: number;
+  hits: number;
+  k: number;
+  bb: number;
+  results: Record<string, number>;
+  avgExitVelo: number | null;
+  maxExitVelo: number | null;
+  bbMix: BbMix;
+  hardHit: number;
+  hardHitOuts: number;
+}
+
+export interface PitchTypeStat {
+  type: string;
+  label: string;
+  count: number;
+  swings: number;
+  whiffs: number;
+  inPlay: number;
+}
+
+export interface PitcherEval {
+  playerId: string;
+  name: string;
+  pitches: number;
+  swings: number;
+  whiffs: number;
+  calledStrikes: number;
+  balls: number;
+  inPlay: number;
+  mistakes: number;
+  byType: PitchTypeStat[];
+}
+
+export interface TeamEval {
+  side: 'home' | 'away';
+  name: string;
+  runs: number;
+  hits: number;
+  batters: BatterEval[];
+  avgExitVelo: number | null;
+  maxExitVelo: number | null;
+  hardHit: number;
+  hardHitOuts: number;
+  bbMix: BbMix;
+  k: number;
+  bb: number;
+  // batting plate discipline
+  pitchesSeen: number;
+  swings: number;
+  whiffs: number;
+  chases: number; // swings at pitches out of the zone
+}
+
+export interface TalentActivation {
+  talentId: string;
+  displayName: string;
+  count: number;
+}
+
+export interface FieldingLine {
+  playerId: string;
+  name: string;
+  position: number | null;
+  chances: number;
+  putouts: number;
+  assists: number;
+  fieldErrors: number;
+  plays: number;
+  closePlays: number;
+  rangeAvg: number | null;
+  armMax: number | null;
+  pae: number; // plays above expected, this game
+  stealAttempts: number;
+  caughtStealing: number;
+}
+
+export interface ReplayEvaluation {
+  ourSide: 'home' | 'away';
+  matched: boolean; // whether ourTeamId matched a side
+  us: TeamEval;
+  them: TeamEval;
+  ourPitcher: PitcherEval | null;
+  talentActivations: TalentActivation[]; // our team, most-active first
+  hardHitThreshold: number | null; // EV cutoff used for "hard-hit"
+  fielding?: FieldingLine[]; // our team's per-player fielding for this game
+  notes: string[];
+}
+
+// Builds the compact per-player fielding lines for one game from the full
+// metrics extraction (used by the single-game Replay Analysis view).
+export function fieldingLinesFromMetrics(metrics: GameMetrics): FieldingLine[] {
+  return metrics.players
+    .filter((p) => p.chances > 0 || p.putouts > 0 || p.assists > 0 || p.stealAttempts > 0)
+    .map((p) => ({
+      playerId: p.playerId,
+      name: p.name,
+      position: p.position,
+      chances: p.chances,
+      putouts: p.putouts,
+      assists: p.assists,
+      fieldErrors: p.fieldErrors,
+      plays: p.putouts + p.assists,
+      closePlays: p.closePlays,
+      rangeAvg: p.rangeCount ? Math.round((p.rangeSum / p.rangeCount) * 10) / 10 : null,
+      armMax: p.throwSpeedMax || null,
+      pae: Math.round((p.engagedOuts - p.expectedOuts) * 10) / 10,
+      stealAttempts: p.stealAttempts,
+      caughtStealing: p.caughtStealing,
+    }))
+    .sort((a, b) => b.plays - a.plays || b.chances - a.chances);
+}
+
+const PITCH_LABELS: Record<string, string> = {
+  fourSeamFastball: '4-Seam',
+  twoSeamFastball: '2-Seam',
+  cutter: 'Cutter',
+  sinker: 'Sinker',
+  slider: 'Slider',
+  curveball: 'Curveball',
+  splitter: 'Splitter',
+  changeup: 'Changeup',
+  knuckleball: 'Knuckleball',
+};
+
+const HIT_RESULTS = new Set(['single', 'double', 'triple', 'homerun']);
+
+function bbBucket(launchAngle: number): keyof BbMix {
+  if (launchAngle < 10) return 'ground';
+  if (launchAngle < 25) return 'line';
+  if (launchAngle < 50) return 'fly';
+  return 'popup';
+}
+
+function percentile(sorted: number[], p: number): number {
+  if (sorted.length === 0) return 0;
+  const idx = Math.min(sorted.length - 1, Math.floor(p * sorted.length));
+  return sorted[idx];
+}
+
+interface PlateAppearance {
+  atBatId: number;
+  batterId: string;
+  side: 'home' | 'away';
+  result: string;
+  ev?: number;
+  la?: number;
+}
+
+export function evaluateReplay(raw: any, ourTeamId?: string): ReplayEvaluation {
+  const game = raw?.game ?? {};
+  const home = game.home ?? {};
+  const away = game.away ?? {};
+
+  const playerById = new Map<string, { name: string; side: 'home' | 'away'; bats?: string }>();
+  const talentNames = new Map<string, string>();
+  for (const side of ['home', 'away'] as const) {
+    const t = side === 'home' ? home : away;
+    for (const p of t.players ?? []) {
+      const name = `${p.firstName ?? ''} ${p.lastName ?? ''}`.trim() || p.id;
+      playerById.set(p.id, { name, side, bats: p.bats });
+      for (const tal of p.talents ?? []) talentNames.set(tal.id, tal.displayName ?? tal.id);
+    }
+  }
+
+  const matched = ourTeamId === home.id || ourTeamId === away.id;
+  const ourSide: 'home' | 'away' = away.id === ourTeamId ? 'away' : 'home';
+
+  // Accumulators
+  const contactByAB = new Map<number, { ev?: number; la?: number }>();
+  const pas: PlateAppearance[] = [];
+  const pitchers = new Map<string, PitcherEval & { _types: Map<string, PitchTypeStat> }>();
+  const talentCounts = new Map<string, number>();
+  // batting discipline per side
+  const disc: Record<'home' | 'away', { pitchesSeen: number; swings: number; whiffs: number; chases: number }> = {
+    home: { pitchesSeen: 0, swings: 0, whiffs: 0, chases: 0 },
+    away: { pitchesSeen: 0, swings: 0, whiffs: 0, chases: 0 },
+  };
+
+  const getPitcher = (id: string) => {
+    let p = pitchers.get(id);
+    if (!p) {
+      p = {
+        playerId: id,
+        name: playerById.get(id)?.name ?? id,
+        pitches: 0, swings: 0, whiffs: 0, calledStrikes: 0, balls: 0, inPlay: 0, mistakes: 0,
+        byType: [], _types: new Map(),
+      };
+      pitchers.set(id, p);
+    }
+    return p;
+  };
+
+  for (const seg of raw?.segments ?? []) {
+    const md = seg.metadata ?? {};
+    const batterId: string | undefined = md.batterId ?? undefined;
+    const pitcherId: string | undefined = md.pitcherId ?? undefined;
+    const atBatId: number | undefined = md.atBatId ?? undefined;
+    const batterSide = batterId ? playerById.get(batterId)?.side : undefined;
+
+    // Segment-level pitch info (each pitch segment has exactly one pitch.thrown).
+    let segPitchType: string | undefined;
+    let segMistake = false;
+    let sawPitch = false;
+    for (const ev of seg.events ?? []) {
+      if (ev.type === 'pitch.thrown') {
+        sawPitch = true;
+        segPitchType = ev.payload?.pitchType;
+        segMistake = !!ev.payload?.mistake;
+      }
+    }
+
+    let pitcherTypeStat: PitchTypeStat | undefined;
+    if (sawPitch && pitcherId) {
+      const p = getPitcher(pitcherId);
+      p.pitches++;
+      if (segMistake) p.mistakes++;
+      const ptype = segPitchType ?? 'unknown';
+      pitcherTypeStat = p._types.get(ptype);
+      if (!pitcherTypeStat) {
+        pitcherTypeStat = { type: ptype, label: PITCH_LABELS[ptype] ?? ptype, count: 0, swings: 0, whiffs: 0, inPlay: 0 };
+        p._types.set(ptype, pitcherTypeStat);
+      }
+      pitcherTypeStat.count++;
+    }
+    if (sawPitch && batterSide) disc[batterSide].pitchesSeen++;
+
+    for (const ev of seg.events ?? []) {
+      const pl = ev.payload ?? {};
+      switch (ev.type) {
+        case 'pitch.result': {
+          if (pitcherId) {
+            const p = getPitcher(pitcherId);
+            if (pl.outcome === 'ball') p.balls++;
+            else if (pl.outcome === 'strike' && pl.action !== 'swing') p.calledStrikes++;
+            else if (pl.outcome === 'in_play') {
+              p.inPlay++;
+              if (pitcherTypeStat) pitcherTypeStat.inPlay++;
+            }
+          }
+          if (pl.action === 'swing' && pl.inZone === false && batterSide) disc[batterSide].chases++;
+          break;
+        }
+        case 'batter.action': {
+          if (pl.action === 'swing') {
+            if (batterSide) {
+              disc[batterSide].swings++;
+              if (!pl.madeContact) disc[batterSide].whiffs++;
+            }
+            if (pitcherId) {
+              const p = getPitcher(pitcherId);
+              p.swings++;
+              if (pitcherTypeStat) pitcherTypeStat.swings++;
+              if (!pl.madeContact) {
+                p.whiffs++;
+                if (pitcherTypeStat) pitcherTypeStat.whiffs++;
+              }
+            }
+          }
+          break;
+        }
+        case 'batter.contact': {
+          if (atBatId != null) {
+            contactByAB.set(atBatId, { ev: pl.exitVelocity, la: pl.launchAngle });
+          }
+          break;
+        }
+        case 'batter.result': {
+          if (batterId && batterSide) {
+            const c = atBatId != null ? contactByAB.get(atBatId) : undefined;
+            pas.push({
+              atBatId: atBatId ?? -1,
+              batterId,
+              side: batterSide,
+              result: pl.result ?? 'unknown',
+              ev: c?.ev,
+              la: c?.la,
+            });
+          }
+          break;
+        }
+        case 'talent.activated': {
+          const op = pl.ownerId ? playerById.get(pl.ownerId) : undefined;
+          if (op && op.side === ourSide && pl.talentId) {
+            talentCounts.set(pl.talentId, (talentCounts.get(pl.talentId) ?? 0) + 1);
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  // Hard-hit threshold: 70th percentile of all batted-ball exit velocities.
+  const allEv = pas.map((p) => p.ev).filter((v): v is number => typeof v === 'number').sort((a, b) => a - b);
+  const hardHitThreshold = allEv.length >= 5 ? Math.round(percentile(allEv, 0.7) * 10) / 10 : null;
+
+  const buildTeam = (side: 'home' | 'away'): TeamEval => {
+    const t = side === 'home' ? home : away;
+    const sidePas = pas.filter((p) => p.side === side);
+    const batters = new Map<string, BatterEval>();
+    const evByBatter = new Map<string, number[]>();
+
+    for (const pa of sidePas) {
+      let b = batters.get(pa.batterId);
+      if (!b) {
+        const pinfo = playerById.get(pa.batterId);
+        b = {
+          playerId: pa.batterId, name: pinfo?.name ?? pa.batterId, bats: pinfo?.bats,
+          pa: 0, battedBalls: 0, hits: 0, k: 0, bb: 0, results: {},
+          avgExitVelo: null, maxExitVelo: null,
+          bbMix: { ground: 0, line: 0, fly: 0, popup: 0 }, hardHit: 0, hardHitOuts: 0,
+        };
+        batters.set(pa.batterId, b);
+      }
+      b.pa++;
+      b.results[pa.result] = (b.results[pa.result] ?? 0) + 1;
+      if (pa.result === 'strikeout') b.k++;
+      else if (pa.result === 'walk') b.bb++;
+      if (HIT_RESULTS.has(pa.result)) b.hits++;
+      if (typeof pa.ev === 'number') {
+        b.battedBalls++;
+        (evByBatter.get(pa.batterId) ?? evByBatter.set(pa.batterId, []).get(pa.batterId)!).push(pa.ev);
+        if (typeof pa.la === 'number') b.bbMix[bbBucket(pa.la)]++;
+        if (hardHitThreshold != null && pa.ev >= hardHitThreshold) {
+          b.hardHit++;
+          if (!HIT_RESULTS.has(pa.result)) b.hardHitOuts++;
+        }
+      }
+    }
+
+    for (const [id, b] of batters) {
+      const evs = evByBatter.get(id) ?? [];
+      if (evs.length) {
+        b.avgExitVelo = Math.round((evs.reduce((s, v) => s + v, 0) / evs.length) * 10) / 10;
+        b.maxExitVelo = Math.round(Math.max(...evs) * 10) / 10;
+      }
+    }
+
+    const batterList = [...batters.values()].sort((a, b) => b.pa - a.pa);
+    const teamEvs = sidePas.map((p) => p.ev).filter((v): v is number => typeof v === 'number');
+    const bbMix: BbMix = { ground: 0, line: 0, fly: 0, popup: 0 };
+    for (const b of batterList) {
+      bbMix.ground += b.bbMix.ground; bbMix.line += b.bbMix.line; bbMix.fly += b.bbMix.fly; bbMix.popup += b.bbMix.popup;
+    }
+    const lastState = lastGameState(raw);
+    return {
+      side,
+      name: t.name ?? (side === 'home' ? 'Home' : 'Away'),
+      runs: lastState?.score?.[side] ?? 0,
+      hits: lastState?.hits?.[side] ?? batterList.reduce((s, b) => s + b.hits, 0),
+      batters: batterList,
+      avgExitVelo: teamEvs.length ? Math.round((teamEvs.reduce((s, v) => s + v, 0) / teamEvs.length) * 10) / 10 : null,
+      maxExitVelo: teamEvs.length ? Math.round(Math.max(...teamEvs) * 10) / 10 : null,
+      hardHit: batterList.reduce((s, b) => s + b.hardHit, 0),
+      hardHitOuts: batterList.reduce((s, b) => s + b.hardHitOuts, 0),
+      bbMix,
+      k: batterList.reduce((s, b) => s + b.k, 0),
+      bb: batterList.reduce((s, b) => s + b.bb, 0),
+      pitchesSeen: disc[side].pitchesSeen,
+      swings: disc[side].swings,
+      whiffs: disc[side].whiffs,
+      chases: disc[side].chases,
+    };
+  };
+
+  const us = buildTeam(ourSide);
+  const them = buildTeam(ourSide === 'home' ? 'away' : 'home');
+
+  // Our pitcher = the pitcher who threw while the OTHER side batted.
+  let ourPitcher: PitcherEval | null = null;
+  let bestPitches = -1;
+  for (const [id, p] of pitchers) {
+    if (playerById.get(id)?.side === ourSide && p.pitches > bestPitches) {
+      bestPitches = p.pitches;
+      p.byType = [...p._types.values()].sort((a, b) => b.count - a.count);
+      ourPitcher = p;
+    }
+  }
+
+  const talentActivations: TalentActivation[] = [...talentCounts.entries()]
+    .map(([talentId, count]) => ({ talentId, displayName: talentNames.get(talentId) ?? talentId, count }))
+    .sort((a, b) => b.count - a.count);
+
+  const notes = buildNotes(us, them, ourPitcher, hardHitThreshold);
+
+  return { ourSide, matched, us, them, ourPitcher, talentActivations, hardHitThreshold, notes };
+}
+
+// ── Per-player metrics extraction (for the advanced-stats sync) ──────────
+// Produces per-player COUNTING stats for ONE game from our team's side, so
+// they aggregate cleanly across games (averages are derived at query time).
+
+export interface PlayerGameMetrics {
+  playerId: string;
+  name: string;
+  position: number | null; // 1-9 standard scorekeeping number from the replay
+  // batting
+  pa: number;
+  ab: number;
+  hits: number;
+  doubles: number;
+  triples: number;
+  hr: number;
+  k: number;
+  bb: number;
+  bip: number; // balls in play (fair)
+  evSum: number;
+  evCount: number;
+  evMax: number;
+  sweetSpot: number; // launch angle 8–32° (threshold-free "good contact")
+  ground: number;
+  line: number;
+  fly: number;
+  popup: number;
+  swings: number;
+  whiffs: number;
+  chases: number;
+  pitchesSeen: number;
+  // fielding
+  putouts: number;
+  assists: number;
+  fieldErrors: number; // fielder.miss
+  chances: number; // batted balls fielded + missed
+  closePlays: number; // difficult plays converted
+  rangeSum: number; // distance covered start→catch on batted balls
+  rangeCount: number;
+  throwSpeedSum: number;
+  throwSpeedCount: number;
+  throwSpeedMax: number;
+  releaseSum: number;
+  releaseCount: number;
+  // range-calibrated outs (see expectedOut): sum of P(out|distance) over the
+  // fielder's batted-ball engagements, and how many actually became outs.
+  expectedOuts: number;
+  engagedOuts: number;
+  // Σ P(1−P) over engagements — "skill leverage": how many outs are genuinely
+  // in doubt (vs routine/hopeless) at this position. Drives position importance.
+  leverageSum: number;
+  // catcher steal defense (opponent steal attempts faced + how many were caught)
+  stealAttempts: number;
+  caughtStealing: number;
+  // Raw per-engaged-chance records (distance covered + whether it was an out),
+  // so the out-curve can be re-fit and expectedOuts/PAE recomputed at QUERY time
+  // from whatever set is visible — instead of being frozen with the sync-time
+  // curve. Optional: rows synced before this field existed fall back to the
+  // stored (static-curve) expectedOuts/leverageSum until re-synced.
+  engageDists?: { d: number; o: boolean }[];
+}
+
+// Empirical out-conversion probability given how far a fielder had to travel to
+// the ball. PER-POSITION logistic, fit from replay data (~9 games, 60–130
+// chances/pos). The shape matters as much as the midpoint: a steep curve (2B,
+// a≈1.0) means binary routine plays = low skill leverage; a gentle curve (SS,
+// CF) means many in-doubt plays = high leverage. Distances are sim coord units.
+// Re-fit by logistic regression of out-vs-distance on ~32 games (was ~9), foul
+// fetches excluded. Bucketed out-rates (out% at <6 / 6–12 / >12 dist units):
+// infielders convert ~95–100% in close — only the long tail is in doubt, so
+// their leverage is small and lives at distance; outfielders fall ~100%→8%
+// across the 6–12 band where most OF balls land, so OF carries the real
+// leverage. The old steep 2B curve (a=1.0) was a small-sample artifact; at this
+// sample SS and 2B share nearly identical profiles.
+// Re-fit by logistic regression of out-vs-distance over ~50 recent games
+// (1479 engaged chances) via scripts/fit-curves.ts — each position calibrated
+// so mean PAE/chance ≈ 0 (the prior curves had drifted: OF/1B over-read PAE,
+// which made RF look like every player's "best position"). Re-run the fitter
+// and replace these as more games accrue. P (1) and C (2) are not fit — the
+// pitcher rarely fields batted balls and the catcher fields none (steal defense
+// is handled separately), so they keep hand-set IF-ish fallbacks.
+const POS_CURVE: Record<number, { a: number; d50: number }> = {
+  1: { a: 0.35, d50: 12 }, // P  (not fit; rare, IF-ish fallback)
+  2: { a: 0.35, d50: 10 }, // C  (not fit; no batted balls, steal D handled separately)
+  3: { a: 0.18, d50: 21 },   // 1B — converts almost everything; very low leverage
+  4: { a: 0.68, d50: 16 },   // 2B
+  5: { a: 0.26, d50: 17.7 }, // 3B — high conversion even at range → low leverage
+  6: { a: 0.58, d50: 14.8 }, // SS
+  7: { a: 0.28, d50: 6.9 },  // LF
+  8: { a: 0.24, d50: 8.5 },  // CF
+  9: { a: 0.51, d50: 9.7 },  // RF — strong-arm corner
+};
+const DEFAULT_CURVE = { a: 0.35, d50: 11 };
+
+export function expectedOut(distance: number, position: number | null): number {
+  const c = (position != null && POS_CURVE[position]) || DEFAULT_CURVE;
+  return 1 / (1 + Math.exp(c.a * (distance - c.d50)));
+}
+
+// Each steal attempt against the catcher is an in-doubt play (catcher arm/skill
+// swings the out), so it contributes a fixed leverage like a coin-flip chance.
+export const STEAL_LEVERAGE = 0.22;
+
+export interface GameMetrics {
+  ourSide: 'home' | 'away';
+  matched: boolean;
+  completedAt: string | null;
+  players: PlayerGameMetrics[];
+}
+
+// One player's fielding split at a SINGLE position, across the games they
+// played there. Lets us answer "what's this player's best position?" instead
+// of pooling every position into one (position-mixed) line. PAE is position-
+// relative by construction (each position's out-curve is fit so an average
+// fielder ≈ 0), so paePerGame is comparable across a player's own splits —
+// roughly. Caveats: PAE only scores balls ENGAGED (never charges for range a
+// fielder lacks), and small per-position samples are noisy.
+export interface PlayerPositionSplit {
+  position: number; // 1-9 scorekeeping number
+  games: number;
+  chances: number;
+  putouts: number;
+  assists: number;
+  plays: number;
+  fieldErrors: number;
+  fieldPct: number | null;
+  pae: number; // total plays above expected at this position
+  paePerGame: number;
+  expectedOuts: number;
+  rangeAvg: number | null;
+  armAvg: number | null;
+  leverage: number; // Σ P(1−P) skill-leverage at this position
+  closePlays: number;
+  stealAttempts: number;
+  caughtStealing: number;
+}
+
+// Per-player aggregate across multiple games (derived rates), returned by the
+// advanced-stats query route and rendered by the panel.
+export interface AggregatedPlayer {
+  playerId: string;
+  name: string;
+  position: number | null; // most-played fielding position (the primary)
+  games: number;
+  // batting
+  pa: number; ab: number; hits: number; hr: number; k: number; bb: number; bip: number;
+  avg: number; obp: number; kRate: number; bbRate: number;
+  avgEV: number | null; maxEV: number | null; sweetSpotRate: number | null;
+  bbMix: { ground: number; line: number; fly: number; popup: number };
+  swings: number; whiffs: number; chases: number; whiffRate: number | null;
+  // fielding
+  putouts: number; assists: number; fieldErrors: number; chances: number; plays: number;
+  closePlays: number; fieldPct: number | null;
+  rangeAvg: number | null; armAvg: number | null; armMax: number | null; releaseAvg: number | null;
+  // range-calibrated plays above expected (engagedOuts − expectedOuts)
+  pae: number; expectedOuts: number;
+  // catcher steal defense
+  stealAttempts: number; caughtStealing: number; csRate: number | null;
+  // per-position fielding splits (best-position breakdown), most-played first
+  byPosition: PlayerPositionSplit[];
+}
+
+// Data-derived defensive importance of a position, from the synced games.
+export interface PositionImportance {
+  position: string;
+  chances: number;
+  xOuts: number;
+  leverage: number;
+  impVolume: number; // chances share, normalized to mean 1.0
+  impXouts: number; // expected-outs share, normalized to mean 1.0
+  impLeverage: number | null; // skill-leverage share (null until leverage data exists)
+  // Recommended importance the optimizer actually uses: a blend of leverage
+  // (skill sensitivity) and xOuts (workload), with the catcher floored to its
+  // default (its leverage is steals-only, so it under-counts real C value).
+  // Blending damps the small-sample volume noise + chances-taken bias that
+  // otherwise deflates high-range spots like SS. Normalized to mean 1.0.
+  impRecommended: number;
+}
+
+function emptyMetrics(playerId: string, name: string, position: number | null): PlayerGameMetrics {
+  return {
+    playerId, name, position,
+    pa: 0, ab: 0, hits: 0, doubles: 0, triples: 0, hr: 0, k: 0, bb: 0, bip: 0,
+    evSum: 0, evCount: 0, evMax: 0, sweetSpot: 0, ground: 0, line: 0, fly: 0, popup: 0,
+    swings: 0, whiffs: 0, chases: 0, pitchesSeen: 0,
+    putouts: 0, assists: 0, fieldErrors: 0, chances: 0, closePlays: 0,
+    rangeSum: 0, rangeCount: 0,
+    throwSpeedSum: 0, throwSpeedCount: 0, throwSpeedMax: 0, releaseSum: 0, releaseCount: 0,
+    expectedOuts: 0, engagedOuts: 0, leverageSum: 0, stealAttempts: 0, caughtStealing: 0,
+    engageDists: [],
+  };
+}
+
+// Logistic fit (IRLS) of out-vs-distance → curve form P = 1/(1+exp(a(d−d50))).
+// Shared by the query-time dynamic fit and the offline scripts/fit-curves.ts.
+// Returns null below minN or on a degenerate fit (out-rate must fall with dist).
+export function fitOutCurve(data: { d: number; o: boolean }[], minN = 40): { a: number; d50: number } | null {
+  if (data.length < minN) return null;
+  let b0 = 0, b1 = 0; // logit = b0 + b1·d
+  for (let it = 0; it < 100; it++) {
+    let g0 = 0, g1 = 0, h00 = 0, h01 = 0, h11 = 0;
+    for (const { d, o } of data) {
+      const p = 1 / (1 + Math.exp(-(b0 + b1 * d)));
+      const w = Math.max(p * (1 - p), 1e-6);
+      const r = (o ? 1 : 0) - p;
+      g0 += r; g1 += r * d; h00 += w; h01 += w * d; h11 += w * d * d;
+    }
+    h00 += 1e-3; h11 += 1e-3; // ridge for near-separable infield
+    const det = h00 * h11 - h01 * h01;
+    if (Math.abs(det) < 1e-9) break;
+    const s0 = (h11 * g0 - h01 * g1) / det;
+    const s1 = (-h01 * g0 + h00 * g1) / det;
+    b0 += s0; b1 += s1;
+    if (Math.abs(s0) + Math.abs(s1) < 1e-8) break;
+  }
+  if (!(b1 < 0)) return null;
+  return { a: Math.min(1.5, Math.max(0.05, -b1)), d50: Math.min(26, Math.max(4, -b0 / b1)) };
+}
+
+// expectedOut for an explicitly-supplied curve (the dynamic, query-time fit).
+export function curveOut(c: { a: number; d50: number }, distance: number): number {
+  return 1 / (1 + Math.exp(c.a * (distance - c.d50)));
+}
+
+const MOUND_BASE = 5; // fielder.throw targetBase used for returns to the pitcher
+
+export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics {
+  const game = raw?.game ?? {};
+  const home = game.home ?? {};
+  const away = game.away ?? {};
+
+  const playerById = new Map<string, { name: string; side: 'home' | 'away'; position: number | null; coord?: { x: number; y: number } }>();
+  for (const side of ['home', 'away'] as const) {
+    const t = side === 'home' ? home : away;
+    for (const p of t.players ?? []) {
+      const name = `${p.firstName ?? ''} ${p.lastName ?? ''}`.trim() || p.id;
+      playerById.set(p.id, { name, side, position: typeof p.position === 'number' ? p.position : null, coord: p.coordinates });
+    }
+  }
+
+  const matched = ourTeamId === home.id || ourTeamId === away.id;
+  const ourSide: 'home' | 'away' = away.id === ourTeamId ? 'away' : 'home';
+  const isOurs = (id?: string) => !!id && playerById.get(id)?.side === ourSide;
+  // Our starting catcher (position 2) — credited with steal defense.
+  let ourCatcherId: string | undefined;
+  for (const [id, info] of playerById) {
+    if (info.side === ourSide && info.position === 2) { ourCatcherId = id; break; }
+  }
+
+  const rows = new Map<string, PlayerGameMetrics>();
+  const row = (id: string) => {
+    let r = rows.get(id);
+    if (!r) {
+      const p = playerById.get(id);
+      r = emptyMetrics(id, p?.name ?? id, p?.position ?? null);
+      rows.set(id, r);
+    }
+    return r;
+  };
+
+  let curAB: number | undefined;
+  let lastContact: { ev?: number; la?: number } | undefined;
+  let throwBuf: { throwerId: string; targetOut: string | null; base: number }[] = [];
+  // Per-at-bat fielding state for the range-calibrated expected-outs metric.
+  const engageBuf = new Map<string, { dist: number; pos: number | null }>();
+  const outCredit = new Set<string>(); // fielders who recorded a PO/A this at-bat
+  const stealRunners = new Set<string>(); // opponent runners who attempted a steal
+  const outRunners = new Set<string>(); // runners retired this at-bat
+
+  const flushFielding = () => {
+    for (const [fid, e] of engageBuf) {
+      const r = row(fid);
+      const p = expectedOut(e.dist, e.pos);
+      r.expectedOuts += p;
+      r.leverageSum += p * (1 - p);
+      const isOut = outCredit.has(fid);
+      if (isOut) r.engagedOuts++;
+      (r.engageDists ??= []).push({ d: e.dist, o: isOut });
+    }
+    // Catcher steal defense: each opponent steal attempt is an in-doubt play.
+    if (ourCatcherId && stealRunners.size > 0) {
+      const c = row(ourCatcherId);
+      for (const runner of stealRunners) {
+        c.stealAttempts++;
+        c.leverageSum += STEAL_LEVERAGE;
+        if (outRunners.has(runner)) c.caughtStealing++;
+      }
+    }
+    engageBuf.clear();
+    outCredit.clear();
+    stealRunners.clear();
+    outRunners.clear();
+  };
+
+  for (const seg of raw?.segments ?? []) {
+    const md = seg.metadata ?? {};
+    const abId: number | undefined = md.atBatId ?? undefined;
+    const batterId: string | undefined = md.batterId ?? undefined;
+    const batterSide = batterId ? playerById.get(batterId)?.side : undefined;
+
+    if (abId != null && abId !== curAB) {
+      flushFielding();
+      curAB = abId;
+      lastContact = undefined;
+      throwBuf = [];
+    }
+
+    let sawPitch = false;
+    // A foul-ball pitch where the corner fielder merely retrieves a dead ball
+    // is NOT a fielding chance. We detect the foul context per pitch-segment and
+    // skip the chance accounting unless an out is actually recorded (a caught
+    // foul pop-out), so 1B/3B/LF don't get polluted by foul grounders.
+    let segIsFoul = false;
+    let segHasOut = false;
+    for (const ev of seg.events ?? []) {
+      if (ev.type === 'pitch.thrown') sawPitch = true;
+      else if (ev.type === 'batter.foul') segIsFoul = true;
+      else if (ev.type === 'pitch.result' && ev.payload?.outcome === 'foul') segIsFoul = true;
+      else if (ev.type === 'runner.out') segHasOut = true;
+    }
+    const skipFoulFetch = segIsFoul && !segHasOut;
+    if (sawPitch && batterId && batterSide === ourSide) row(batterId).pitchesSeen++;
+
+    for (const ev of seg.events ?? []) {
+      const pl = ev.payload ?? {};
+      switch (ev.type) {
+        case 'batter.action': {
+          if (pl.action === 'swing' && batterId && batterSide === ourSide) {
+            const r = row(batterId);
+            r.swings++;
+            if (!pl.madeContact) r.whiffs++;
+          }
+          break;
+        }
+        case 'pitch.result': {
+          if (pl.action === 'swing' && pl.inZone === false && batterId && batterSide === ourSide) {
+            row(batterId).chases++;
+          }
+          break;
+        }
+        case 'batter.contact': {
+          lastContact = { ev: pl.exitVelocity, la: pl.launchAngle };
+          break;
+        }
+        case 'batter.result': {
+          if (batterId && batterSide === ourSide) {
+            const r = row(batterId);
+            const result = pl.result ?? 'unknown';
+            r.pa++;
+            if (result === 'walk') r.bb++;
+            else r.ab++;
+            if (result === 'strikeout') r.k++;
+            if (HIT_RESULTS.has(result)) {
+              r.hits++;
+              if (result === 'double') r.doubles++;
+              else if (result === 'triple') r.triples++;
+              else if (result === 'homerun') r.hr++;
+            }
+            if (result !== 'walk' && result !== 'strikeout' && lastContact?.ev != null) {
+              r.bip++;
+              r.evSum += lastContact.ev;
+              r.evCount++;
+              if (lastContact.ev > r.evMax) r.evMax = lastContact.ev;
+              if (typeof lastContact.la === 'number') {
+                r[bbBucket(lastContact.la)]++;
+                if (lastContact.la >= 8 && lastContact.la <= 32) r.sweetSpot++;
+              }
+            }
+          }
+          lastContact = undefined;
+          break;
+        }
+        case 'fielder.catch': {
+          if (skipFoulFetch) break; // dead foul-ball retrieval, not a real chance
+          if (isOurs(pl.fielderId) && (pl.catchType === 'ground' || pl.catchType === 'fly')) {
+            const info = playerById.get(pl.fielderId);
+            const r = row(pl.fielderId);
+            r.chances++;
+            const start = info?.coord;
+            const cp = pl.catchPoint;
+            if (start && cp && typeof cp.x === 'number' && typeof cp.y === 'number') {
+              const dist = Math.hypot(cp.x - start.x, cp.y - start.y);
+              r.rangeSum += dist;
+              r.rangeCount++;
+              engageBuf.set(pl.fielderId, { dist, pos: info?.position ?? null });
+            }
+          }
+          break;
+        }
+        case 'fielder.miss': {
+          if (skipFoulFetch) break; // dropped foul ball isn't a fielding chance
+          if (isOurs(pl.fielderId)) {
+            const info = playerById.get(pl.fielderId);
+            const r = row(pl.fielderId);
+            r.chances++;
+            r.fieldErrors++;
+            const start = info?.coord;
+            const cp = pl.catchPoint;
+            if (start && cp && typeof cp.x === 'number' && typeof cp.y === 'number') {
+              engageBuf.set(pl.fielderId, { dist: Math.hypot(cp.x - start.x, cp.y - start.y), pos: info?.position ?? null });
+            }
+          }
+          break;
+        }
+        case 'fielder.throw': {
+          const base = pl.targetBase;
+          if (isOurs(pl.throwerId) && base !== MOUND_BASE) {
+            const r = row(pl.throwerId);
+            if (typeof pl.ballSpeed === 'number') {
+              r.throwSpeedSum += pl.ballSpeed;
+              r.throwSpeedCount++;
+              if (pl.ballSpeed > r.throwSpeedMax) r.throwSpeedMax = pl.ballSpeed;
+            }
+            if (typeof pl.releaseTime === 'number') {
+              r.releaseSum += pl.releaseTime;
+              r.releaseCount++;
+            }
+            throwBuf.push({ throwerId: pl.throwerId, targetOut: pl.targetOut ?? null, base });
+          } else if (base !== MOUND_BASE && pl.throwerId) {
+            // still buffer (for assist linking even if thrower not ours — harmless)
+            throwBuf.push({ throwerId: pl.throwerId, targetOut: pl.targetOut ?? null, base });
+          }
+          break;
+        }
+        case 'runner.steal':
+        case 'runner.stolen_base': {
+          // An opponent steal attempt (we're fielding → our catcher defends).
+          if (pl.runnerId && batterSide && batterSide !== ourSide) stealRunners.add(pl.runnerId);
+          break;
+        }
+        case 'runner.out': {
+          const fielderId = pl.fielderId;
+          if (pl.runnerId) outRunners.add(pl.runnerId);
+          if (isOurs(fielderId)) {
+            const r = row(fielderId);
+            r.putouts++;
+            outCredit.add(fielderId);
+            if (pl.closePlay) r.closePlays++;
+            // Assist: a different fielder whose throw targeted this out.
+            const credited = new Set<string>();
+            for (const th of throwBuf) {
+              if (th.targetOut && th.targetOut === pl.runnerId && th.throwerId !== fielderId && isOurs(th.throwerId)) {
+                if (!credited.has(th.throwerId)) {
+                  row(th.throwerId).assists++;
+                  outCredit.add(th.throwerId);
+                  credited.add(th.throwerId);
+                }
+              }
+            }
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  flushFielding(); // resolve the final at-bat's fielding engagements
+
+  return {
+    ourSide,
+    matched,
+    completedAt: raw?.completedAt ?? raw?.game?.completedAt ?? null,
+    players: [...rows.values()],
+  };
+}
+
+// Raw per-chance fielding observations for our team — one record per engaged
+// batted ball (the SAME population expectedOuts/PAE are computed over): the
+// distance the fielder covered and whether it became an out. Used by the
+// offline POS_CURVE fitter (scripts/fit-curves.ts) so the calibration matches
+// exactly what PAE measures at runtime. Mirrors extractPlayerMetrics's
+// engageBuf/outCredit logic; intentionally excludes batting/steal accounting.
+export interface FieldingChance {
+  position: number | null;
+  distance: number;
+  isOut: boolean;
+}
+
+export function collectFieldingChances(raw: any, ourTeamId?: string): FieldingChance[] {
+  const game = raw?.game ?? {};
+  const home = game.home ?? {};
+  const away = game.away ?? {};
+  const playerById = new Map<string, { side: 'home' | 'away'; position: number | null; coord?: { x: number; y: number } }>();
+  for (const side of ['home', 'away'] as const) {
+    const t = side === 'home' ? home : away;
+    for (const p of t.players ?? []) {
+      playerById.set(p.id, { side, position: typeof p.position === 'number' ? p.position : null, coord: p.coordinates });
+    }
+  }
+  const ourSide: 'home' | 'away' = away.id === ourTeamId ? 'away' : 'home';
+  const isOurs = (id?: string) => !!id && playerById.get(id)?.side === ourSide;
+
+  const out: FieldingChance[] = [];
+  let curAB: number | undefined;
+  let throwBuf: { throwerId: string; targetOut: string | null; base: number }[] = [];
+  const engageBuf = new Map<string, { dist: number; pos: number | null }>();
+  const outCredit = new Set<string>();
+
+  const flush = () => {
+    for (const [fid, e] of engageBuf) out.push({ position: e.pos, distance: e.dist, isOut: outCredit.has(fid) });
+    engageBuf.clear();
+    outCredit.clear();
+  };
+
+  for (const seg of raw?.segments ?? []) {
+    const md = seg.metadata ?? {};
+    const abId: number | undefined = md.atBatId ?? undefined;
+    if (abId != null && abId !== curAB) { flush(); curAB = abId; throwBuf = []; }
+
+    let segIsFoul = false, segHasOut = false;
+    for (const ev of seg.events ?? []) {
+      if (ev.type === 'batter.foul') segIsFoul = true;
+      else if (ev.type === 'pitch.result' && ev.payload?.outcome === 'foul') segIsFoul = true;
+      else if (ev.type === 'runner.out') segHasOut = true;
+    }
+    const skipFoulFetch = segIsFoul && !segHasOut;
+
+    for (const ev of seg.events ?? []) {
+      const pl = ev.payload ?? {};
+      if ((ev.type === 'fielder.catch' && !skipFoulFetch && isOurs(pl.fielderId) && (pl.catchType === 'ground' || pl.catchType === 'fly'))
+        || (ev.type === 'fielder.miss' && !skipFoulFetch && isOurs(pl.fielderId))) {
+        const info = playerById.get(pl.fielderId);
+        const start = info?.coord;
+        const cp = pl.catchPoint;
+        if (start && cp && typeof cp.x === 'number' && typeof cp.y === 'number') {
+          engageBuf.set(pl.fielderId, { dist: Math.hypot(cp.x - start.x, cp.y - start.y), pos: info?.position ?? null });
+        }
+      } else if (ev.type === 'fielder.throw') {
+        if (pl.targetBase !== MOUND_BASE && pl.throwerId) throwBuf.push({ throwerId: pl.throwerId, targetOut: pl.targetOut ?? null, base: pl.targetBase });
+      } else if (ev.type === 'runner.out' && isOurs(pl.fielderId)) {
+        outCredit.add(pl.fielderId);
+        const credited = new Set<string>();
+        for (const th of throwBuf) {
+          if (th.targetOut && th.targetOut === pl.runnerId && th.throwerId !== pl.fielderId && isOurs(th.throwerId) && !credited.has(th.throwerId)) {
+            outCredit.add(th.throwerId);
+            credited.add(th.throwerId);
+          }
+        }
+      }
+    }
+  }
+  flush();
+  return out;
+}
+
+function lastGameState(raw: any): any {
+  const segs = raw?.segments ?? [];
+  for (let i = segs.length - 1; i >= 0; i--) {
+    if (segs[i]?.gameState) return segs[i].gameState;
+  }
+  return undefined;
+}
+
+function pct(n: number, d: number): number {
+  return d > 0 ? Math.round((n / d) * 100) : 0;
+}
+
+function buildNotes(
+  us: TeamEval,
+  them: TeamEval,
+  pitcher: PitcherEval | null,
+  threshold: number | null,
+): string[] {
+  const notes: string[] = [];
+  const won = us.runs > them.runs;
+  notes.push(`${won ? 'Won' : us.runs === them.runs ? 'Tied' : 'Lost'} ${us.runs}–${them.runs} with ${us.hits} hits to ${them.hits}.`);
+
+  if (us.hardHitOuts >= 2 && threshold != null) {
+    notes.push(`${us.hardHitOuts} hard-hit balls (EV ≥ ${threshold}) were caught for outs — some bad batted-ball luck.`);
+  }
+
+  // Best batted ball
+  let best: { name: string; ev: number; result: string } | null = null;
+  for (const b of us.batters) {
+    if (b.maxExitVelo != null && (!best || b.maxExitVelo > best.ev)) {
+      const result = Object.entries(b.results).sort((a, c) => c[1] - a[1])[0]?.[0] ?? '';
+      best = { name: b.name, ev: b.maxExitVelo, result };
+    }
+  }
+  if (best) notes.push(`Hardest contact: ${best.name} at ${best.ev} EV.`);
+
+  if (us.swings > 0) {
+    notes.push(`Plate discipline: ${pct(us.whiffs, us.swings)}% whiff on ${us.swings} swings, ${us.chases} chases out of zone.`);
+  }
+
+  if (pitcher && pitcher.swings > 0) {
+    const best = [...pitcher.byType].filter((t) => t.swings >= 3).sort((a, b) => (b.whiffs / b.swings) - (a.whiffs / a.swings))[0];
+    notes.push(
+      `Our pitcher: ${pct(pitcher.whiffs, pitcher.swings)}% whiff, ${pitcher.mistakes} mistake pitch${pitcher.mistakes === 1 ? '' : 'es'}` +
+      (best ? `; best whiff pitch was ${best.label} (${pct(best.whiffs, best.swings)}%).` : '.'),
+    );
+  }
+
+  return notes;
+}

@@ -1,6 +1,6 @@
 import type { ModeFilter, TimeFilter } from './api';
 import { MODE_OPTIONS, TIME_OPTIONS } from './api';
-import { effectiveStats, type PitchTalent, type PlayerMetaStore } from './playerMeta';
+import { effectiveStats, normalizeArchetype, type PitchTalent, type PlayerMetaStore } from './playerMeta';
 import { TALENT_BY_NAME } from './talents';
 import type { Player, Team } from './types';
 
@@ -20,10 +20,18 @@ function labelFor<T extends string>(
   return options.find((o) => o.value === value)?.label ?? value;
 }
 
+// Manual archetype override (set in the Roster editor) wins over the scraped one.
+function archetypeOf(p: Player, metaStore: PlayerMetaStore): string | undefined {
+  return (p.uuid ? metaStore[p.uuid]?.archetype : undefined) ?? normalizeArchetype(p.archetype);
+}
+
 function playerMetaLine(p: Player, metaStore: PlayerMetaStore): string {
   const meta = p.uuid ? metaStore[p.uuid] : undefined;
   if (!meta) return '';
   const parts: string[] = [];
+  if (typeof meta.age === 'number') {
+    parts.push(`Age: ${meta.age}`);
+  }
   if (meta.bats || meta.throws) {
     parts.push(`B/T: ${meta.bats ?? '?'}/${meta.throws ?? '?'}`);
   }
@@ -82,7 +90,7 @@ export function buildTeamSummary(
     const slash = `${fmt3(b.avg)}/${fmt3(b.obp)}/${fmt3(b.slg)}`;
     const fPct = f?.fieldingPct != null ? fmt3(f.fieldingPct) : '-';
     lines.push(
-      `| ${p.battingOrder ?? '-'} | ${p.name} | ${p.position ?? '-'} | ${p.archetype ?? '-'} | ${slash} | ${fmt3(b.ops)} | ${b.ab ?? '-'} | ${b.runs ?? '-'} | ${b.hr ?? '-'} | ${b.rbi ?? '-'} | ${b.bb ?? '-'} | ${b.k ?? '-'} | ${fPct} | ${f?.putouts ?? '-'} | ${f?.assists ?? '-'} | ${f?.errors ?? '-'} |`,
+      `| ${p.battingOrder ?? '-'} | ${p.name} | ${p.position ?? '-'} | ${archetypeOf(p, metaStore) ?? '-'} | ${slash} | ${fmt3(b.ops)} | ${b.ab ?? '-'} | ${b.runs ?? '-'} | ${b.hr ?? '-'} | ${b.rbi ?? '-'} | ${b.bb ?? '-'} | ${b.k ?? '-'} | ${fPct} | ${f?.putouts ?? '-'} | ${f?.assists ?? '-'} | ${f?.errors ?? '-'} |`,
     );
     const metaLine = playerMetaLine(p, metaStore);
     if (metaLine) lines.push(metaLine);
@@ -96,7 +104,7 @@ export function buildTeamSummary(
       const f = p.fielding;
       const fStr = f?.fieldingPct != null ? `, F% ${fmt3(f.fieldingPct)} (${f.putouts ?? 0}PO ${f.assists ?? 0}A ${f.errors ?? 0}E)` : '';
       lines.push(
-        `- ${p.name} (${p.position ?? '?'}, ${p.archetype ?? '?'}) — ${fmt3(b.avg)}/${fmt3(b.obp)}/${fmt3(b.slg)}, ${b.ab ?? 0} AB${fStr}`,
+        `- ${p.name} (${p.position ?? '?'}, ${archetypeOf(p, metaStore) ?? '?'}) — ${fmt3(b.avg)}/${fmt3(b.obp)}/${fmt3(b.slg)}, ${b.ab ?? 0} AB${fStr}`,
       );
       const metaLine = playerMetaLine(p, metaStore);
       if (metaLine) lines.push(metaLine);
@@ -109,7 +117,7 @@ export function buildTeamSummary(
     lines.push('');
     lines.push('## Pitcher');
     lines.push(
-      `${p.name} (${p.archetype ?? '?'}) — ERA ${fmt2(pi.era)}, WHIP ${fmt2(pi.whip)}, ${pi.ip ?? '-'} IP, ${pi.k ?? '-'} K, ${pi.bb ?? '-'} BB`,
+      `${p.name} (${archetypeOf(p, metaStore) ?? '?'}) — ERA ${fmt2(pi.era)}, WHIP ${fmt2(pi.whip)}, ${pi.ip ?? '-'} IP, ${pi.k ?? '-'} K, ${pi.bb ?? '-'} BB`,
     );
     const metaLine = playerMetaLine(p, metaStore);
     if (metaLine) lines.push(metaLine);
