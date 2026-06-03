@@ -28,6 +28,11 @@ const INJURY_DOT_COLORS: Record<string, string> = {
 interface Props {
   team: Team;
   metaStore: PlayerMetaStore;
+  // Bumped by the parent when stat snapshots are written/edited elsewhere
+  // (RosterEditor). statHistory lives in localStorage, not React state, so we
+  // re-read it whenever this changes — otherwise the chart and delta table stay
+  // stale until a full page refresh.
+  historyVersion?: number;
 }
 
 type ViewStat = 'ovr' | keyof SimStats;
@@ -46,10 +51,12 @@ function statValue(snap: StatSnapshot, stat: ViewStat): number {
   return stat === 'ovr' ? snap.ovr : snap.sim[stat];
 }
 
-export function TrainingPanel({ team, metaStore }: Props) {
+export function TrainingPanel({ team, metaStore, historyVersion = 0 }: Props) {
   const [viewStat, setViewStat] = useState<ViewStat>('ovr');
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const histories = useMemo(() => getAllPlayerHistories(), [team]);
+  // getAllPlayerHistories reads localStorage (not a real dep): team and
+  // historyVersion are intentional re-read triggers, not values it consumes.
+  const histories = useMemo(() => getAllPlayerHistories(), [team, historyVersion]);
 
   const playersWithHistory = useMemo(() => {
     return team.players
@@ -74,6 +81,17 @@ export function TrainingPanel({ team, metaStore }: Props) {
     if (selected.size === 0) return playersWithHistory;
     return playersWithHistory.filter((p) => selected.has(p.player.uuid!));
   }, [playersWithHistory, selected]);
+
+  // Stable color per player (keyed by full-roster index) so a player keeps the
+  // same hue in the chart and the Latest-changes table, regardless of which
+  // subset is currently selected for the chart.
+  const colorByUuid = useMemo(() => {
+    const m: Record<string, string> = {};
+    playersWithHistory.forEach(({ player }, i) => {
+      if (player.uuid) m[player.uuid] = PLAYER_COLORS[i % PLAYER_COLORS.length];
+    });
+    return m;
+  }, [playersWithHistory]);
 
   return (
     <CollapsiblePanel title="Training progress" defaultOpen={playersWithHistory.length > 0}>
@@ -134,7 +152,7 @@ export function TrainingPanel({ team, metaStore }: Props) {
               </div>
 
               {/* Chart */}
-              <Chart players={chartPlayers} stat={viewStat} metaStore={metaStore} />
+              <Chart players={chartPlayers} stat={viewStat} metaStore={metaStore} colorByUuid={colorByUuid} />
 
               <div className="flex items-center gap-4 text-[10px] text-slate-500">
                 <span className="text-slate-600">Injuries:</span>
@@ -149,7 +167,7 @@ export function TrainingPanel({ team, metaStore }: Props) {
               </div>
 
               {/* Delta table */}
-              <DeltaTable players={playersWithHistory.map((p) => p.player)} />
+              <DeltaTable players={playersWithHistory} colorByUuid={colorByUuid} />
             </>
           )}
         </div>
@@ -250,14 +268,33 @@ function severityRank(s: string): number {
   return 1;
 }
 
+// Least-squares slope of value vs. time, expressed per day.
+function slopePerDay(points: { t: number; v: number }[]): number {
+  if (points.length < 2) return 0;
+  const dayMs = 86_400_000;
+  const xs = points.map((p) => p.t / dayMs);
+  const ys = points.map((p) => p.v);
+  const n = xs.length;
+  const mx = xs.reduce((a, b) => a + b, 0) / n;
+  const my = ys.reduce((a, b) => a + b, 0) / n;
+  let num = 0, den = 0;
+  for (let i = 0; i < n; i++) {
+    num += (xs[i] - mx) * (ys[i] - my);
+    den += (xs[i] - mx) ** 2;
+  }
+  return den === 0 ? 0 : num / den;
+}
+
 function Chart({
   players,
   stat,
   metaStore,
+  colorByUuid,
 }: {
   players: { player: Player; snapshots: StatSnapshot[] }[];
   stat: ViewStat;
   metaStore: PlayerMetaStore;
+  colorByUuid: Record<string, string>;
 }) {
   const { data, domain } = useMemo(() => {
     const timeMap = new Map<number, Record<string, number>>();
@@ -325,17 +362,24 @@ function Chart({
           />
           {players.map(({ player }, idx) => {
             const timeline = player.uuid ? injuryTimelines[player.uuid] : undefined;
+            const color = (player.uuid && colorByUuid[player.uuid]) || PLAYER_COLORS[idx % PLAYER_COLORS.length];
             return (
               <Line
                 key={player.uuid}
                 type="monotone"
                 dataKey={player.name}
-                stroke={PLAYER_COLORS[idx % PLAYER_COLORS.length]}
+                stroke={color}
                 strokeWidth={2}
                 dot={(props: Record<string, unknown>) => {
-                  const ts = props.payload && typeof props.payload === 'object' ? (props.payload as Record<string, unknown>).timestamp as number : 0;
+                  const payload = props.payload && typeof props.payload === 'object' ? props.payload as Record<string, unknown> : undefined;
+                  const ts = (payload?.timestamp as number) ?? 0;
                   const cx = props.cx as number;
                   const cy = props.cy as number;
+                  // Skip days where this player has no snapshot — otherwise Recharts
+                  // draws a stray dot at the top of the plot (cy≈0) for the gap.
+                  if (payload?.[player.name] == null || cx == null || cy == null || Number.isNaN(cy)) {
+                    return <g key={`${player.uuid}-${ts}-empty`} />;
+                  }
                   const severity = timeline?.get(ts);
                   if (severity) {
                     const fill = INJURY_DOT_COLORS[severity] ?? INJURY_DOT_COLORS.minor;
@@ -356,7 +400,7 @@ function Chart({
                       cx={cx}
                       cy={cy}
                       r={3}
-                      fill={PLAYER_COLORS[idx % PLAYER_COLORS.length]}
+                      fill={color}
                       stroke="none"
                       strokeWidth={0}
                     />
@@ -373,19 +417,88 @@ function Chart({
   );
 }
 
-function DeltaTable({ players }: { players: Player[] }) {
-  const rows = players
-    .map((p) => {
-      if (!p.uuid) return null;
-      const delta = getLatestDelta(p.uuid);
-      if (!delta) return null;
-      const totalDiff = delta.deltas.reduce((sum, d) => sum + d.diff, 0);
-      return { player: p, ...delta, totalDiff };
-    })
-    .filter((r): r is NonNullable<typeof r> => r !== null)
-    .sort((a, b) => b.totalDiff - a.totalDiff);
+type DeltaSortKey = 'name' | keyof SimStats | 'total' | 'perWeek';
 
-  if (rows.length === 0) return null;
+function DeltaTable({
+  players,
+  colorByUuid,
+}: {
+  players: { player: Player; snapshots: StatSnapshot[] }[];
+  colorByUuid: Record<string, string>;
+}) {
+  const [sortKey, setSortKey] = useState<DeltaSortKey>('total');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const baseRows = useMemo(
+    () =>
+      players
+        .map(({ player: p, snapshots }) => {
+          if (!p.uuid) return null;
+          const delta = getLatestDelta(p.uuid);
+          if (!delta) return null;
+          const totalDiff = delta.deltas.reduce((sum, d) => sum + d.diff, 0);
+          const byStat = {} as Record<keyof SimStats, number>;
+          for (const d of delta.deltas) byStat[d.stat] = d.diff;
+          // OVR growth rate per week — least-squares slope over the full
+          // history (one point per training day, latest snapshot wins).
+          const byDay = new Map<number, StatSnapshot>();
+          for (const s of snapshots) {
+            const k = trainingDayKey(s.timestamp);
+            const prev = byDay.get(k);
+            if (!prev || s.timestamp > prev.timestamp) byDay.set(k, s);
+          }
+          const points = Array.from(byDay.entries())
+            .map(([t, s]) => ({ t, v: s.ovr }))
+            .sort((a, b) => a.t - b.t);
+          const perWeek = Math.round(slopePerDay(points) * 7 * 10) / 10;
+          return { player: p, byStat, ovrDiff: delta.ovrDiff, totalDiff, perWeek };
+        })
+        .filter((r): r is NonNullable<typeof r> => r !== null),
+    [players],
+  );
+
+  const rows = useMemo(() => {
+    const sorted = [...baseRows];
+    sorted.sort((a, b) => {
+      let av: number | string, bv: number | string;
+      if (sortKey === 'name') {
+        av = a.player.name.toLowerCase();
+        bv = b.player.name.toLowerCase();
+      } else if (sortKey === 'total') {
+        av = a.totalDiff;
+        bv = b.totalDiff;
+      } else if (sortKey === 'perWeek') {
+        av = a.perWeek;
+        bv = b.perWeek;
+      } else {
+        av = a.byStat[sortKey] ?? 0;
+        bv = b.byStat[sortKey] ?? 0;
+      }
+      if (av < bv) return sortDir === 'asc' ? -1 : 1;
+      if (av > bv) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+    return sorted;
+  }, [baseRows, sortKey, sortDir]);
+
+  const toggleSort = (key: DeltaSortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir(key === 'name' ? 'asc' : 'desc');
+    }
+  };
+
+  if (baseRows.length === 0) return null;
+
+  const sortArrow = (key: DeltaSortKey) =>
+    sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+
+  const diffClass = (n: number) =>
+    n > 0 ? 'text-emerald-400' : n < 0 ? 'text-red-400' : 'text-slate-600';
+
+  const fmt = (n: number) => `${n > 0 ? '+' : ''}${n}`;
 
   return (
     <div>
@@ -396,47 +509,62 @@ function DeltaTable({ players }: { players: Player[] }) {
         <table className="w-full border-collapse text-xs">
           <thead>
             <tr className="border-b border-slate-800 text-[10px] uppercase tracking-wider text-slate-500">
-              <th className="px-2 py-1 text-left">Player</th>
+              <th
+                className="cursor-pointer select-none px-2 py-1 text-left hover:text-slate-300"
+                onClick={() => toggleSort('name')}
+              >
+                Player{sortArrow('name')}
+              </th>
               {SIM_KEYS.map((k) => (
-                <th key={k} className="px-2 py-1 text-right">{SIM_LABELS[k]}</th>
+                <th
+                  key={k}
+                  className="cursor-pointer select-none px-2 py-1 text-right hover:text-slate-300"
+                  onClick={() => toggleSort(k)}
+                >
+                  {SIM_LABELS[k]}{sortArrow(k)}
+                </th>
               ))}
-              <th className="px-2 py-1 text-right">OVR</th>
-              <th className="px-2 py-1 text-right">Days</th>
+              <th
+                className="cursor-pointer select-none px-2 py-1 text-right hover:text-slate-300"
+                title="Total sim-stat increase (OVR change)"
+                onClick={() => toggleSort('total')}
+              >
+                Δ (OVR){sortArrow('total')}
+              </th>
+              <th
+                className="cursor-pointer select-none px-2 py-1 text-right hover:text-slate-300"
+                title="OVR growth rate per week (least-squares slope over full history)"
+                onClick={() => toggleSort('perWeek')}
+              >
+                OVR/wk{sortArrow('perWeek')}
+              </th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.player.uuid} className="border-b border-slate-800/60 last:border-0">
-                <td className="px-2 py-1 text-slate-200">{row.player.name}</td>
-                {row.deltas.map((d) => (
-                  <td
-                    key={d.stat}
-                    className={
-                      'px-2 py-1 text-right font-mono ' +
-                      (d.diff > 0
-                        ? 'text-emerald-400'
-                        : d.diff < 0
-                          ? 'text-red-400'
-                          : 'text-slate-600')
-                    }
-                  >
-                    {d.diff > 0 ? '+' : ''}{d.diff || '·'}
-                  </td>
-                ))}
-                <td
-                  className={
-                    'px-2 py-1 text-right font-mono font-bold ' +
-                    (row.ovrDiff > 0
-                      ? 'text-emerald-400'
-                      : row.ovrDiff < 0
-                        ? 'text-red-400'
-                        : 'text-slate-600')
-                  }
-                >
-                  {row.ovrDiff > 0 ? '+' : ''}{row.ovrDiff}
+                <td className="px-2 py-1 text-slate-200">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ background: (row.player.uuid && colorByUuid[row.player.uuid]) || '#64748b' }}
+                    />
+                    {row.player.name}
+                  </span>
                 </td>
-                <td className="px-2 py-1 text-right text-slate-500">
-                  {row.daysBetween}d
+                {SIM_KEYS.map((k) => {
+                  const diff = row.byStat[k] ?? 0;
+                  return (
+                    <td key={k} className={'px-2 py-1 text-right font-mono ' + diffClass(diff)}>
+                      {diff > 0 ? '+' : ''}{diff || '·'}
+                    </td>
+                  );
+                })}
+                <td className={'px-2 py-1 text-right font-mono font-bold ' + diffClass(row.totalDiff)}>
+                  {fmt(row.totalDiff)} <span className="font-normal text-slate-500">({fmt(row.ovrDiff)})</span>
+                </td>
+                <td className={'whitespace-nowrap px-2 py-1 text-right font-mono ' + diffClass(row.perWeek)}>
+                  {fmt(row.perWeek)}
                 </td>
               </tr>
             ))}

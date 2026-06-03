@@ -43,6 +43,27 @@
       "when": 1779350000000,
       "tag": "0005_add_position_weights",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1779360000000,
+      "tag": "0006_add_replay_metrics",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1779370000000,
+      "tag": "0007_add_archetype",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1779380000000,
+      "tag": "0008_add_age",
+      "breakpoints": true
     }
   ]
 }

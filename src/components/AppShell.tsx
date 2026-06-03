@@ -16,14 +16,17 @@ import { TeamLookup } from './TeamLookup';
 import { TimeRangeFilter } from './TimeRangeFilter';
 import { ModeBreakdown } from './ModeBreakdown';
 import { TrainingPanel } from './TrainingPanel';
+import { AdvancedStatsPanel } from './AdvancedStatsPanel';
+import { Matchups } from './Matchups';
 
-type Tab = 'overview' | 'stats' | 'roster' | 'tools' | 'debug';
+type Tab = 'overview' | 'stats' | 'roster' | 'tools' | 'matchups' | 'debug';
 
 const TABS: { value: Tab; label: string; devOnly?: boolean }[] = [
   { value: 'overview', label: 'Overview' },
   { value: 'stats', label: 'Stats' },
   { value: 'roster', label: 'Roster' },
   { value: 'tools', label: 'Tools' },
+  { value: 'matchups', label: 'Matchups' },
   { value: 'debug', label: 'Debug', devOnly: true },
 ];
 
@@ -65,6 +68,13 @@ export function AppShell({
   buildInsights,
 }: Props) {
   const [tab, setTab] = useState<Tab>('overview');
+  // Bumped whenever a mutation invalidates data that sibling panels read but
+  // don't own — they key re-reads off these counters so changes show without a
+  // full page refresh. statHistory lives in localStorage; replay metrics +
+  // position weights live in the DB. Both writers and readers are children
+  // here, so this is the natural place to lift the signal.
+  const [statHistoryVersion, setStatHistoryVersion] = useState(0);
+  const [replayDataVersion, setReplayDataVersion] = useState(0);
 
   const visibleTabs = process.env.NODE_ENV === 'development'
     ? TABS
@@ -155,7 +165,7 @@ export function AppShell({
 
         <div className={tab === 'overview' ? 'space-y-4' : 'hidden'}>
           <OptimalBattingOrder team={team} metaStore={metaStore} />
-          <FieldPositionsPanel team={team} metaStore={metaStore} teamUuid={uuid} onNavigateToRoster={() => setTab('roster')} />
+          <FieldPositionsPanel team={team} metaStore={metaStore} teamUuid={uuid} dataVersion={replayDataVersion} onNavigateToRoster={() => setTab('roster')} />
           <PositionGuidancePanel />
           <InsightsPanel buildContext={buildAdviseContext} buildCompactContext={buildCompactContext} buildInsights={buildInsights} teamUuid={uuid} />
         </div>
@@ -165,14 +175,16 @@ export function AppShell({
           <PitcherCard pitcher={team.pitcher} />
           <RecentGamesPanel team={team} />
           <ModeBreakdown teamUuid={uuid} time={time} />
+          <AdvancedStatsPanel teamUuid={uuid} onDataChange={() => setReplayDataVersion((v) => v + 1)} />
         </div>
 
         <div className={tab === 'roster' ? 'space-y-4' : 'hidden'}>
-          <TrainingPanel team={team} metaStore={metaStore} />
+          <TrainingPanel team={team} metaStore={metaStore} historyVersion={statHistoryVersion} />
           <RosterEditor
             team={team}
             metaStore={metaStore}
             onChange={onMetaStoreChange}
+            onHistoryChange={() => setStatHistoryVersion((v) => v + 1)}
           />
         </div>
 
@@ -193,6 +205,13 @@ export function AppShell({
             inline
           />
         </div>
+
+        {/* Mounted lazily so its games fetch only fires when opened. */}
+        {tab === 'matchups' && (
+          <div className="space-y-4">
+            <Matchups teamUuid={uuid} />
+          </div>
+        )}
 
         {tab === 'debug' && process.env.NODE_ENV === 'development' && (
           <RawJsonPanel raw={raw} />

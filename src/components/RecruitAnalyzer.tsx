@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { SIM_KEYS, SIM_LABELS, type PitchTalent, type SimStats } from '../lib/playerMeta';
+import { ARCHETYPES, SIM_KEYS, SIM_LABELS, type PitchTalent, type SimStats } from '../lib/playerMeta';
 import { STANDALONE_TALENTS } from '../lib/talentClassify';
 import { TalentPicker } from './TalentPicker';
 import { PitchTalentEditor } from './PitchTalentEditor';
@@ -23,12 +23,6 @@ const ZERO: SimStats = { con: 0, pow: 0, spd: 0, fld: 0, arm: 0, pit: 0, sta: 0 
 // canonical SIM_KEYS order used for OVR math.
 const RECRUIT_STAT_ORDER: (keyof SimStats)[] = ['pow', 'con', 'spd', 'sta', 'fld', 'arm', 'pit'];
 
-// The 11 player archetypes (see system-prompt Archetypes section).
-const ARCHETYPES = [
-  'Slugger', 'Brute', 'Spark', 'Scout', 'Flash', 'Hawk',
-  'Gunner', 'Weaver', 'Ace', 'Two Way', 'Wildcard',
-];
-
 function computeOvr(sim: SimStats): number {
   const total = SIM_KEYS.reduce((sum, k) => sum + sim[k], 0);
   return Math.round(total / SIM_KEYS.length);
@@ -40,28 +34,34 @@ function clamp(n: number): number {
 }
 
 const PROMPT_PREFIX =
-  'I\'m evaluating a potential recruit for my roster. Here are their stats:\n\n';
+  'I\'m evaluating a potential recruit as a LONG-TERM roster investment. ' +
+  'Here are their stats:\n\n';
 const PROMPT_SUFFIX =
-  '\n\nShould I pick up this player? Consider: where they\'d fit positionally, ' +
-  'whether they improve on anyone currently in the lineup, what their OVR means ' +
-  'given that PIT is wasted on non-pitchers, and whether they\'re worth the ' +
-  'training/injury maintenance cost.\n\n' +
-  'IMPORTANT — the salary cap has gone up, so I have more room than before. ' +
-  'Don\'t evaluate this recruit purely as a straight replacement for a current ' +
-  'starter; also weigh them as a potential longer-term add or depth piece worth ' +
-  'developing, even if they aren\'t an immediate upgrade.\n' +
-  'Age matters for the long view: players start as young as ~18 and retire around ' +
-  '~30, so a younger recruit has more seasons of useful service and more runway to ' +
-  'develop, while an older one is a shorter-term play. Factor the given age (if ' +
-  'provided) into how much long-term value they offer.\n' +
-  'Talent unlocks: when I recruit a player they unlock talents based on their own ' +
-  'randomized talent-unlock tiers, so the talents listed here (if any) are not the ' +
-  'final picture — recruiting them grants additional unlocks I can\'t fully see in ' +
-  'advance. Higher stat rolls / OVR tend to come with more (and earlier) unlock ' +
-  'tiers, so a strong recruit will likely deliver multiple talent unlocks, adding ' +
-  'upside beyond their raw stats. Factor this latent talent potential into the ' +
-  'evaluation, especially for high-stat recruits.\n\n' +
-  'Be concise — bullets, not paragraphs.';
+  '\n\nEvaluate this recruit as a multi-season succession decision, NOT as an ' +
+  'immediate upgrade check. Answer these specifically:\n' +
+  '1. WORTH DEVELOPING? Is this player worth investing training into and leveling ' +
+  'up over time? Judge by CEILING and runway, not current OVR — weigh their ' +
+  'archetype-primary stats, age/seasons of useful service left (players start ~18 ' +
+  'and retire around ~30, and retirement is becoming a real game mechanic), and ' +
+  'latent talent unlocks. (When recruited, a player unlocks more talents from their ' +
+  'own randomized unlock tiers — higher stat rolls/OVR tend to bring more and ' +
+  'earlier unlocks — so the talents listed here, if any, undersell a strong recruit. ' +
+  'Factor that hidden upside in.) Remember PIT is wasted OVR on a non-pitcher.\n' +
+  '2. WHO DO THEY REPLACE, AND WHEN? Name the current starter(s) at their best ' +
+  'position(s) that this recruit would compete with or eventually take over from, ' +
+  'and give a rough timeline — would they push for the spot now, after a season or ' +
+  'two of training, or only once the incumbent ages out/declines? Player ages show ' +
+  'as "Age: N" on a roster line when I\'ve entered them (they\'re not in the game ' +
+  'feed). Use the ages that are shown; if timing hinges on an incumbent whose age ' +
+  'isn\'t shown, name them and ASK me instead of guessing.\n' +
+  '3. LOCK-AND-HOLD PLAN. I can "lock" a recruit in the recruit tab and they will ' +
+  'NOT age while locked. So a viable move is to grab a young high-ceiling prospect, ' +
+  'lock them to freeze their age for some number of years, and unlock + train them ' +
+  'later as a planned replacement when an incumbent retires or declines. Give a ' +
+  'concrete recommendation: develop now, LOCK and hold for ~N years then promote ' +
+  '(say who they\'d replace), or pass — with a one-line reason.\n\n' +
+  '(Salary cap room is ample, so don\'t reject them just for adding payroll.)\n\n' +
+  'Be concise — bullets, not paragraphs. Lead with the verdict.';
 
 export function RecruitAnalyzer({ open, onClose, buildContext, buildCompactContext, teamUuid, inline }: Props) {
   const [name, setName] = useState('');
@@ -225,6 +225,11 @@ export function RecruitAnalyzer({ open, onClose, buildContext, buildCompactConte
           clear
         </button>
       </div>
+
+      <p className="mb-3 text-xs text-slate-500">
+        Long-term fit: is this player worth developing, who would they replace and when, and is it
+        worth locking them (locked recruits don’t age) to hold as a future replacement.
+      </p>
 
       <div className="space-y-4">
         <div className="flex gap-2">

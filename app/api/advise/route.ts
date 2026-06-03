@@ -3,10 +3,14 @@ import { SYSTEM_PROMPT } from '@/lib/system-prompt';
 import { checkRateLimit } from '@/lib/rate-limit';
 
 const MAX_CONTEXT_LEN = 50_000;
-const MAX_QUESTION_LEN = 2_000;
+// The recruit and talent-advisor tools build structured prompts (stat lines,
+// talent option lists, multi-point instructions) that legitimately run past a
+// chat-sized cap — 2k silently truncated their closing instructions mid-word.
+// Generous but still bounded (context is the large field, capped separately).
+const MAX_QUESTION_LEN = 8_000;
 const MAX_HISTORY_TURNS = 6;
 
-const ALLOWED_ACTION_TYPES = new Set(['talent-advisor', 'recruit', 'insight']);
+const ALLOWED_ACTION_TYPES = new Set(['talent-advisor', 'recruit', 'insight', 'game-analysis', 'matchup-analysis']);
 
 export async function POST(req: Request) {
   const userId = await getUser();

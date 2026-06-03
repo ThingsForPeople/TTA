@@ -8,7 +8,8 @@
     "start": "next start",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "audit:talents": "tsx scripts/audit-talents.ts"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.12.0",
@@ -32,6 +33,7 @@
     "@types/react-dom": "^18.3.1",
     "drizzle-kit": "^0.30.0",
     "tailwindcss": "^4.0.0",
+    "tsx": "^4.22.4",
     "typescript": "^5.6.3"
   }
 }

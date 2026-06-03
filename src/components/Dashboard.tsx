@@ -56,6 +56,8 @@ async function saveMetaToApi(playerUuid: string, meta: PlayerMeta): Promise<void
         pitchTalents: meta.pitchTalents ?? [],
         bats: meta.bats ?? null,
         throws: meta.throws ?? null,
+        archetype: meta.archetype ?? null,
+        age: meta.age ?? null,
       }),
     });
     if (!res.ok) {

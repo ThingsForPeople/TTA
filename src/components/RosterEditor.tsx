@@ -2,10 +2,13 @@
 
 import { useState, useEffect, useRef } from 'react';
 import {
+  ARCHETYPES,
   clearInjury,
   effectiveStats,
   emptyMeta,
   hasSim,
+  isPitcherArchetype,
+  normalizeArchetype,
   setInjury,
   SIM_KEYS,
   SIM_LABELS,
@@ -39,9 +42,13 @@ interface Props {
   team: Team;
   metaStore: PlayerMetaStore;
   onChange: (next: PlayerMetaStore) => void;
+  // Fired after any stat-snapshot write (record/edit/delete) so the parent can
+  // tell the Training panel to re-read localStorage. Without it, the chart and
+  // "latest changes" table only update on a full page refresh.
+  onHistoryChange?: () => void;
 }
 
-export function RosterEditor({ team, metaStore, onChange }: Props) {
+export function RosterEditor({ team, metaStore, onChange, onHistoryChange }: Props) {
   const [editingHistory, setEditingHistory] = useState<string | null>(null);
   const [historyVersion, setHistoryVersion] = useState(0);
 
@@ -99,6 +106,7 @@ export function RosterEditor({ team, metaStore, onChange }: Props) {
                 const uuid = player.uuid!;
                 const sim = (metaStore[uuid] ?? emptyMeta()).sim;
                 recordSnapshot(uuid, sim);
+                onHistoryChange?.();
               }}
               onTalentsChange={(talents) =>
                 updatePlayer(player.uuid!, (m) => ({ ...m, talents }))
@@ -114,6 +122,12 @@ export function RosterEditor({ team, metaStore, onChange }: Props) {
               }
               onHandednessChange={(bats, throws_) =>
                 updatePlayer(player.uuid!, (m) => ({ ...m, bats, throws: throws_ }))
+              }
+              onArchetypeChange={(archetype) =>
+                updatePlayer(player.uuid!, (m) => ({ ...m, archetype }))
+              }
+              onAgeChange={(age) =>
+                updatePlayer(player.uuid!, (m) => ({ ...m, age }))
               }
               onInjuryChange={(severity, note) => {
                 updatePlayer(player.uuid!, (m) =>
@@ -150,11 +164,13 @@ export function RosterEditor({ team, metaStore, onChange }: Props) {
               updateSnapshot(editingHistory, snap.timestamp, sim);
               if (snap.id) updateSnapshotApi(snap.id, sim, computeOvr(sim));
               setHistoryVersion((v) => v + 1);
+              onHistoryChange?.();
             }}
             onDelete={(snap) => {
               deleteSnapshot(editingHistory, snap.timestamp);
               if (snap.id) deleteSnapshotApi(snap.id);
               setHistoryVersion((v) => v + 1);
+              onHistoryChange?.();
             }}
           />
         );
@@ -185,6 +201,8 @@ interface RowProps {
   onTalentLevelChange: (talent: string, level: number) => void;
   onPitchTalentsChange: (pitchTalents: PitchTalent[]) => void;
   onHandednessChange: (bats: Hand | undefined, throws_: Hand | undefined) => void;
+  onArchetypeChange: (archetype: string | undefined) => void;
+  onAgeChange: (age: number | undefined) => void;
   onInjuryChange: (severity: InjurySeverity | undefined, note?: string) => void;
   onEditHistory: () => void;
 }
@@ -199,12 +217,20 @@ function PlayerRow({
   onTalentLevelChange,
   onPitchTalentsChange,
   onHandednessChange,
+  onArchetypeChange,
+  onAgeChange,
   onInjuryChange,
   onEditHistory,
 }: RowProps) {
   const [expanded, setExpanded] = useState(!hasData);
 
+  // Manual archetype override wins; otherwise fall back to the scraped one
+  // (which arrives lowercase, so normalize it to the canonical title-case form).
+  const effectiveArchetype = meta.archetype ?? normalizeArchetype(player.archetype);
   const isPitcher = player.position === 'P' || player.pitching !== undefined;
+  // Pitcher archetypes (Ace/Gunner/Weaver/Two Way) can carry pitch talents even
+  // when they aren't currently listed at P.
+  const canPitch = isPitcher || isPitcherArchetype(effectiveArchetype);
   const injury = meta.injury;
   const borderClass = injury ? INJURY_BORDER[injury.severity] : 'border-slate-800';
   const ovr = hasSim(meta)
@@ -376,6 +402,36 @@ function PlayerRow({
                 </button>
               ))}
             </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wider text-slate-500">Archetype:</span>
+              <select
+                value={effectiveArchetype ?? ''}
+                onChange={(e) => onArchetypeChange(e.target.value || undefined)}
+                title="Pitcher archetypes (Ace, Gunner, Weaver, Two Way) unlock pitch talents below"
+                className="rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[11px] text-slate-300 focus:border-emerald-500 focus:outline-none"
+              >
+                <option value="">—</option>
+                {ARCHETYPES.map((a) => (
+                  <option key={a} value={a}>{a}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wider text-slate-500">Age:</span>
+              <input
+                type="number"
+                min={16}
+                max={45}
+                value={meta.age ?? ''}
+                placeholder="—"
+                title="Not in the game feed — enter manually. Powers retirement/succession advice (players retire ~30)."
+                onChange={(e) => {
+                  const v = e.target.value.trim();
+                  onAgeChange(v === '' ? undefined : Math.max(0, Math.round(Number(v))) || undefined);
+                }}
+                className="w-14 rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[11px] text-slate-300 placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
           </div>
 
           {/* Sim stats grid */}
@@ -406,8 +462,8 @@ function PlayerRow({
             </div>
           </div>
 
-          {/* Talents */}
-          {isPitcher ? (
+          {/* Talents — pitchers and pitcher archetypes can add pitch talents */}
+          {canPitch ? (
             <>
               <TalentPicker
                 selected={meta.talents}

@@ -15,8 +15,10 @@ import {
   type StatWeights,
   type StatBreakdown,
 } from '../lib/rosterOptimizer';
-import { getSlotTalents, recommendBattingOrder, recommendSynergyBattingOrder, type BattingSlotRole } from '../lib/analysis';
+import { getSlotTalents, type BattingSlotRole } from '../lib/analysis';
 import { TALENT_BY_NAME } from '../lib/talents';
+import { buildFieldingGrades, type FieldingGrades } from '../lib/fieldingGrades';
+import type { AggregatedPlayer } from '../lib/parseReplay';
 
 function talentTooltip(label: string): string | undefined {
   const name = label.replace(/ Lv\d+$/, '').replace(/ \(.*\)$/, '');
@@ -33,10 +35,11 @@ function useOptimization(
   metaStore: PlayerMetaStore,
   positionImportance?: Record<string, number>,
   statWeights?: StatWeights,
+  fieldingGrades?: FieldingGrades,
 ): RosterOptimization {
   return useMemo(
-    () => optimizeRoster(team, metaStore, positionImportance, statWeights),
-    [team, metaStore, positionImportance, statWeights],
+    () => optimizeRoster(team, metaStore, positionImportance, statWeights, fieldingGrades),
+    [team, metaStore, positionImportance, statWeights, fieldingGrades],
   );
 }
 
@@ -155,17 +158,45 @@ function StatFitChips({ breakdown }: { breakdown: StatBreakdown[] }) {
   );
 }
 
-function AssignmentRow({ a }: { a: RosterAssignment }) {
+// Style the position-importance chip by leverage: brighter = defense matters
+// more at this spot (and thus weighs more heavily in Team fit).
+function importanceChipStyle(imp: number): string {
+  if (imp >= 1.1) return 'bg-emerald-500/15 text-emerald-300';
+  if (imp <= 0.9) return 'bg-slate-700/60 text-slate-500';
+  return 'bg-slate-700/60 text-slate-400';
+}
+
+function AssignmentRow({ a, importance }: { a: RosterAssignment; importance: Record<string, number> }) {
+  const imp = importance[a.position] ?? 1;
   return (
     <tr className="border-b border-slate-800/60 last:border-0">
       <td className="px-2 py-1.5">
-        <PositionBadge position={a.position} moved={a.moved} />
+        <span className="inline-flex items-center gap-1.5">
+          <PositionBadge position={a.position} moved={a.moved} />
+          <span
+            title={`Position importance ×${imp.toFixed(2)} — Team fit multiplies this player's fit by how much defense matters at ${a.position}. A great glove is worth more at a higher-×N spot.`}
+            className={'rounded px-1 py-0.5 font-mono text-[10px] font-medium ' + importanceChipStyle(imp)}
+          >
+            ×{imp.toFixed(2)}
+          </span>
+        </span>
       </td>
       <td className="px-2 py-1.5">
         <span className={a.injured ? 'text-red-400 line-through' : 'text-slate-200'}>
           {a.player.name}
         </span>
         {a.injured && <span className="ml-1 text-xs text-red-400">INJ</span>}
+        {a.empiricalAdj !== undefined && (
+          <span
+            title={`Real replay fielding at ${a.position}: ${a.empiricalAdj > 0 ? '+' : ''}${a.empiricalAdj} pts (Plays Above Expected + arm)`}
+            className={
+              'ml-1.5 rounded px-1 py-0.5 text-[10px] font-medium ' +
+              (a.empiricalAdj > 0 ? 'bg-emerald-500/15 text-emerald-300' : 'bg-red-500/15 text-red-300')
+            }
+          >
+            def {a.empiricalAdj > 0 ? '+' : ''}{a.empiricalAdj}
+          </span>
+        )}
       </td>
       <td className="px-2 py-1.5">
         {a.moved && a.currentPosition ? (
@@ -213,10 +244,14 @@ function AssignmentRow({ a }: { a: RosterAssignment }) {
 
 interface FieldPositionsPanelProps extends Props {
   teamUuid: string;
+  // Bumped by the parent when the Advanced Stats panel syncs replays or applies
+  // new importance weights. Both are fetched here once per teamUuid, so without
+  // this signal the recommendation stays stale until a full page refresh.
+  dataVersion?: number;
   onNavigateToRoster?: () => void;
 }
 
-export function FieldPositionsPanel({ team, metaStore, teamUuid, onNavigateToRoster }: FieldPositionsPanelProps) {
+export function FieldPositionsPanel({ team, metaStore, teamUuid, dataVersion = 0, onNavigateToRoster }: FieldPositionsPanelProps) {
   const [positionImportance, setPositionImportance] = useState<Record<string, number>>(
     () => ({ ...DEFAULT_POSITION_IMPORTANCE }),
   );
@@ -238,28 +273,57 @@ export function FieldPositionsPanel({ team, metaStore, teamUuid, onNavigateToRos
       })
       .catch(() => setWeightsLoaded(true));
     return () => { cancelled = true; };
-  }, [teamUuid]);
+  }, [teamUuid, dataVersion]);
 
   const handleWeightsChange = useCallback((w: Record<string, number>, sw: StatWeights) => {
     setPositionImportance(w);
     setStatWeights(sw);
   }, []);
 
-  const { assignments, bench, benchUpgrades, warnings } = useOptimization(
+  // Empirical fielding grades from synced replays — fold real defensive
+  // outcomes into the position recommendation (null until/unless synced).
+  const [fieldingGrades, setFieldingGrades] = useState<FieldingGrades | undefined>(undefined);
+  const [gradeGames, setGradeGames] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/team/${teamUuid}/replay-metrics`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { players?: AggregatedPlayer[]; totalGames?: number } | null) => {
+        if (cancelled || !data?.players?.length) return;
+        setFieldingGrades(buildFieldingGrades(data.players));
+        setGradeGames(data.totalGames ?? 0);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [teamUuid, dataVersion]);
+
+  const { options, currentTotalScore, bench, benchUpgrades, warnings } = useOptimization(
     team,
     metaStore,
     weightsLoaded ? positionImportance : undefined,
     weightsLoaded ? statWeights : undefined,
+    fieldingGrades,
   );
 
-  const totalCurrent = assignments.reduce((sum, a) => sum + (a.currentPositionScore ?? a.positionScore), 0);
-  const totalOptimal = assignments.reduce((sum, a) => sum + a.positionScore, 0);
-  const diff = totalOptimal - totalCurrent;
+  const [optionIdx, setOptionIdx] = useState(0);
+  // Reset to the best option when the team changes.
+  useEffect(() => { setOptionIdx(0); }, [teamUuid]);
+
+  const safeIdx = options[optionIdx] ? optionIdx : 0;
+  const selected = options[safeIdx];
+  const rows = selected?.assignments ?? [];
+  const bestScore = options[0]?.totalScore ?? 0;
+  const optimalScore = selected?.totalScore ?? 0;
+  const diff = optimalScore - currentTotalScore;
 
   return (
     <CollapsiblePanel
       title="Optimal field positions"
-      subtitle="Defense-critical positions filled first. Fit score = weighted sim stats for that position (120+ great, 80+ good, 40+ OK)."
+      subtitle={
+        fieldingGrades
+          ? `Top lineups by team fit, now informed by real fielding from ${gradeGames} synced game${gradeGames === 1 ? '' : 's'} (the "def" chips). Switch options to explore alternatives.`
+          : 'Top lineups by team fit — switch options to explore close alternatives. Per-row fit = weighted sim stats (120+ great, 80+ good, 40+ OK). Sync replays on the Stats tab to fold in real defense.'
+      }
       headerAction={
         <PositionWeightsEditor
           teamUuid={teamUuid}
@@ -290,6 +354,33 @@ export function FieldPositionsPanel({ team, metaStore, teamUuid, onNavigateToRos
         </div>
       ))}
 
+      {options.length > 1 && (
+        <div className="mb-3 flex flex-wrap gap-1.5">
+          {options.map((o, i) => {
+            const d = o.totalScore - bestScore;
+            const active = i === safeIdx;
+            return (
+              <button
+                key={i}
+                type="button"
+                onClick={() => setOptionIdx(i)}
+                title={i === 0 ? 'Best lineup' : `${d} vs best`}
+                className={
+                  'rounded border px-2 py-1 text-xs transition-colors ' +
+                  (active
+                    ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300'
+                    : 'border-slate-700 text-slate-400 hover:text-slate-200')
+                }
+              >
+                <span className="font-medium">Opt {i + 1}</span>
+                <span className="ml-1.5 font-mono">{o.totalScore}</span>
+                {i > 0 && <span className="ml-1 text-[10px] text-slate-500">{d}</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-xs">
           <thead>
@@ -303,29 +394,35 @@ export function FieldPositionsPanel({ team, metaStore, teamUuid, onNavigateToRos
             </tr>
           </thead>
           <tbody>
-            {assignments.map((a) => (
-              <AssignmentRow key={a.player.uuid ?? a.player.name} a={a} />
+            {rows.map((a) => (
+              <AssignmentRow key={a.player.uuid ?? a.player.name} a={a} importance={positionImportance} />
             ))}
           </tbody>
         </table>
       </div>
 
       <div className="mt-2 flex items-center justify-end gap-3 border-t border-slate-800 pt-2 text-xs">
-        <span className="text-slate-500">Team fit</span>
-        <span className="font-mono text-slate-400">{totalCurrent}</span>
-        {diff !== 0 && (
+        <span className="text-slate-500">
+          Team fit{options.length > 1 ? ` (option ${safeIdx + 1})` : ''}
+        </span>
+        <span className="font-mono text-slate-400" title="Current setup">{currentTotalScore}</span>
+        {diff !== 0 ? (
           <>
             <span className="text-slate-600">→</span>
-            <span className="font-mono text-slate-200">{totalOptimal}</span>
+            <span className="font-mono text-slate-200" title="Selected option">{optimalScore}</span>
             <span className={`font-medium ${diff > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
               {diff > 0 ? '+' : ''}{diff}
             </span>
           </>
-        )}
-        {diff === 0 && (
+        ) : (
           <span className="text-xs text-slate-600">optimal</span>
         )}
       </div>
+
+      <p className="mt-1 text-right text-[10px] leading-snug text-slate-600">
+        Fit is the raw sim-stat match; Team fit weights each row by position importance (the ×N chips).
+        So moving a better glove to a higher-×N spot can raise the total even when both players&apos; raw fits dip.
+      </p>
 
       {bench.length > 0 && (
         <div className="mt-3 border-t border-slate-800 pt-3">
@@ -378,45 +475,13 @@ export function FieldPositionsPanel({ team, metaStore, teamUuid, onNavigateToRos
 // ── Batting Order Panel ──────────────────────────────────────────────
 
 export function OptimalBattingOrder({ team, metaStore }: Props) {
-  const { battingOrder } = useOptimization(team, metaStore);
-  const [synergy, setSynergy] = useState(false);
-  const synergyOrder = useMemo(
-    () => synergy ? recommendSynergyBattingOrder(team, metaStore) : null,
-    [synergy, team, metaStore],
-  );
-  const displayOrder = synergyOrder ?? battingOrder;
+  const { battingOrder: displayOrder } = useOptimization(team, metaStore);
 
   return (
     <CollapsiblePanel
       title="Recommended batting order"
-      subtitle={synergy
-        ? 'wOBA + role scoring + adjacent talent chain optimization.'
-        : 'wOBA + role-based slot scoring. ▲ moved up · ▼ moved down from current slot.'}
+      subtitle="wOBA + role-based slot scoring (talent slot-affinity included). ▲ moved up · ▼ moved down from current slot."
     >
-      <div className="mb-3 flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setSynergy(false)}
-          className={`rounded border px-2 py-0.5 text-xs transition-colors ${
-            !synergy
-              ? 'border-sky-500/40 bg-sky-500/10 text-sky-400'
-              : 'border-slate-700 text-slate-500 hover:text-slate-300'
-          }`}
-        >
-          Stats-first
-        </button>
-        <button
-          type="button"
-          onClick={() => setSynergy(true)}
-          className={`rounded border px-2 py-0.5 text-xs transition-colors ${
-            synergy
-              ? 'border-purple-500/40 bg-purple-500/10 text-purple-400'
-              : 'border-slate-700 text-slate-500 hover:text-slate-300'
-          }`}
-        >
-          Talent chains
-        </button>
-      </div>
       {displayOrder.recommended.length === 0 ? (
         <p className="text-sm text-slate-400">No active players found.</p>
       ) : (

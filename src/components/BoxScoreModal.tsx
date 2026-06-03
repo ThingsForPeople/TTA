@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { ReplayAnalysis } from './ReplayAnalysis';
 
 interface Props {
   teamUuid: string;
@@ -80,6 +81,7 @@ export function BoxScoreModal({ teamUuid, gameId, onClose }: Props) {
   const [data, setData] = useState<BoxScoreData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<'box' | 'replay'>('box');
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -124,7 +126,21 @@ export function BoxScoreModal({ teamUuid, gameId, onClose }: Props) {
     >
       <div className="flex max-h-full w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-slate-700 bg-slate-900 shadow-2xl">
         <header className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
-          <h2 className="text-sm font-semibold text-slate-100">Box Score</h2>
+          <div className="flex items-center gap-1">
+            {(['box', 'replay'] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTab(t)}
+                className={
+                  'rounded-md px-2.5 py-1 text-sm font-medium transition-colors ' +
+                  (tab === t ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:text-slate-200')
+                }
+              >
+                {t === 'box' ? 'Box Score' : 'Replay Analysis'}
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             onClick={onClose}
@@ -136,13 +152,17 @@ export function BoxScoreModal({ teamUuid, gameId, onClose }: Props) {
         </header>
 
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-5">
-          {loading ? (
-            <p className="text-sm text-slate-400">Loading box score...</p>
-          ) : error ? (
-            <p className="text-sm text-red-300">Failed to load: {error}</p>
-          ) : data ? (
-            <BoxScoreContent data={data} />
-          ) : null}
+          {tab === 'box' ? (
+            loading ? (
+              <p className="text-sm text-slate-400">Loading box score...</p>
+            ) : error ? (
+              <p className="text-sm text-red-300">Failed to load: {error}</p>
+            ) : data ? (
+              <BoxScoreContent data={data} />
+            ) : null
+          ) : (
+            <ReplayAnalysis teamUuid={teamUuid} gameId={gameId} />
+          )}
         </div>
       </div>
     </div>

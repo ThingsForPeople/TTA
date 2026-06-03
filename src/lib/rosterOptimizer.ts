@@ -9,6 +9,7 @@ import {
   hasSim,
 } from './playerMeta';
 import { recommendBattingOrder, type BattingOrderResult } from './analysis';
+import { empiricalFieldingBonus, type FieldingGrades } from './fieldingGrades';
 
 export interface StatBreakdown {
   stat: string;
@@ -30,6 +31,7 @@ export interface RosterAssignment {
   position: string;
   positionScore: number;
   currentPositionScore?: number;
+  empiricalAdj?: number; // points added/removed from real replay fielding data
   reason: string;
   breakdown: StatBreakdown[];
   currentPosition?: string;
@@ -47,8 +49,19 @@ export interface BenchUpgrade {
   gain: number;
 }
 
-export interface RosterOptimization {
+export interface FieldOption {
   assignments: RosterAssignment[];
+  /** Importance-weighted total fit (incl. combo bonuses) used to rank options. */
+  totalScore: number;
+}
+
+export interface RosterOptimization {
+  /** The best option's assignments (kept for back-compat / batting order). */
+  assignments: RosterAssignment[];
+  /** Up to 5 highest-scoring lineups, best first, for exploration. */
+  options: FieldOption[];
+  /** Importance-weighted total fit of the team's CURRENT positions. */
+  currentTotalScore: number;
   bench: RosterAssignment[];
   benchUpgrades: BenchUpgrade[];
   battingOrder: BattingOrderResult;
@@ -95,7 +108,7 @@ interface FieldingTalentRule {
   posBonus?: Partial<Record<FieldPosition, number>>;
 }
 
-const FIELDING_TALENT_RULES: Record<string, FieldingTalentRule> = {
+export const FIELDING_TALENT_RULES: Record<string, FieldingTalentRule> = {
   'Charger':        { positions: INFIELD_POSITIONS, bonus: 12 },
   'No Doubles':     { positions: OUTFIELD_POSITIONS, bonus: 12 },
   'Hot Potato':     { positions: 'all', bonus: 6 },
@@ -317,8 +330,14 @@ export function optimizeRoster(
   metaStore: PlayerMetaStore,
   positionImportance?: Record<string, number>,
   statWeights?: StatWeights,
+  fieldingGrades?: FieldingGrades,
 ): RosterOptimization {
   const warnings: string[] = [];
+  // How much each position values arm strength (drives the transferable arm
+  // component of the empirical fielding bonus).
+  const armImp = (pos: FieldPosition) => (statWeights ?? DEFAULT_STAT_WEIGHTS)[pos]?.arm ?? 0;
+  const empBonus = (pos: FieldPosition, uuid: string | undefined) =>
+    empiricalFieldingBonus(pos, uuid, fieldingGrades, armImp(pos));
   const all = team.players ?? [];
   const isPitcher = (p: Player) =>
     p.position === 'P' || p.position === 'SP' || p === team.pitcher;
@@ -347,7 +366,7 @@ export function optimizeRoster(
     for (const pos of FIELD_POSITIONS) {
       const { score, reason } = positionScore(pos, sim, meta, statWeights, p);
       const injuryPenalty = isInjured(meta) ? 0.5 : 0;
-      scoreboard.push({ player: p, pos, score: score - injuryPenalty, reason });
+      scoreboard.push({ player: p, pos, score: score - injuryPenalty + empBonus(pos, p.uuid), reason });
     }
   }
 
@@ -374,29 +393,42 @@ export function optimizeRoster(
 
   const n = playerUuids.length;
   const posCount = availablePositions.length;
+  const importance = positionImportance ?? DEFAULT_POSITION_IMPORTANCE;
+
+  // Objective for a full assignment: importance-weighted position fit + combos.
+  const assignmentObjective = (
+    map: Map<string, { pos: FieldPosition; score: number; reason: string }>,
+  ): number => {
+    let sum = 0;
+    for (const [, a] of map) sum += a.score * (importance[a.pos] ?? 1);
+    return sum + comboBonus(map, metaStore, pitcherMeta);
+  };
+
+  // Exhaustive search, but keep the top-K distinct lineups by objective (not
+  // just the single best) so the UI can offer alternatives to explore.
+  const MAX_OPTIONS = 5;
+  const topK: { score: number; perm: number[] }[] = [];
   const perm = availablePositions.map((_, i) => i);
-  let bestTotalScore = -Infinity;
-  let bestPerm: number[] = [];
   const trial = new Map<string, { pos: FieldPosition; score: number; reason: string }>();
 
-  function searchPerms(depth: number) {
-    if (depth === n) {
-      trial.clear();
-      let sum = 0;
-      for (let i = 0; i < n; i++) {
-        const pos = availablePositions[perm[i]];
-        const { score, reason } = lookupScore(playerUuids[i], pos);
-        trial.set(playerUuids[i], { pos, score, reason });
-        const importance = positionImportance ?? DEFAULT_POSITION_IMPORTANCE;
-        sum += score * (importance[pos] ?? 1);
-      }
-      sum += comboBonus(trial, metaStore, pitcherMeta);
-      if (sum > bestTotalScore) {
-        bestTotalScore = sum;
-        bestPerm = perm.slice(0, n);
-      }
-      return;
+  const considerPerm = () => {
+    trial.clear();
+    for (let i = 0; i < n; i++) {
+      const pos = availablePositions[perm[i]];
+      trial.set(playerUuids[i], { pos, ...lookupScore(playerUuids[i], pos) });
     }
+    const score = assignmentObjective(trial);
+    if (topK.length < MAX_OPTIONS) {
+      topK.push({ score, perm: perm.slice(0, n) });
+      topK.sort((a, b) => b.score - a.score);
+    } else if (score > topK[topK.length - 1].score) {
+      topK[topK.length - 1] = { score, perm: perm.slice(0, n) };
+      topK.sort((a, b) => b.score - a.score);
+    }
+  };
+
+  function searchPerms(depth: number) {
+    if (depth === n) { considerPerm(); return; }
     for (let i = depth; i < posCount; i++) {
       [perm[depth], perm[i]] = [perm[i], perm[depth]];
       searchPerms(depth + 1);
@@ -406,66 +438,93 @@ export function optimizeRoster(
 
   searchPerms(0);
 
-  const assigned = new Map<string, { pos: FieldPosition; score: number; reason: string }>();
-  for (let i = 0; i < n; i++) {
-    const pos = availablePositions[bestPerm[i]];
-    const { score, reason } = lookupScore(playerUuids[i], pos);
-    assigned.set(playerUuids[i], { pos, score, reason });
-  }
+  const posOrder = new Map(positionPriority.map((pp, i) => [pp, i]));
 
-  // Build assignments (starters only)
-  const assignments: RosterAssignment[] = [];
+  // Build a full, display-sorted assignment list (starters + kept players) for
+  // one candidate permutation.
+  const buildAssignments = (permVec: number[]): RosterAssignment[] => {
+    const assigned = new Map<string, { pos: FieldPosition; score: number; reason: string }>();
+    for (let i = 0; i < n; i++) {
+      const pos = availablePositions[permVec[i]];
+      assigned.set(playerUuids[i], { pos, ...lookupScore(playerUuids[i], pos) });
+    }
 
-  for (const p of withSim) {
-    const a = assigned.get(p.uuid!);
-    if (a) {
+    const list: RosterAssignment[] = [];
+    for (const p of withSim) {
+      const a = assigned.get(p.uuid!);
       const meta = metaStore[p.uuid!];
-      const sim = effectiveStats(meta);
-      const { breakdown } = positionScore(a.pos, sim, meta, statWeights, p);
-      const curPos = p.position as FieldPosition | undefined;
-      const currentPosScore = curPos && FIELD_POSITIONS.includes(curPos as FieldPosition)
-        ? Math.round(positionScore(curPos as FieldPosition, sim, meta, statWeights, p).score)
-        : undefined;
-      assignments.push({
-        player: p,
-        position: a.pos,
-        positionScore: Math.round(a.score),
-        currentPositionScore: currentPosScore,
-        reason: a.reason,
-        breakdown,
-        currentPosition: p.position ?? undefined,
-        moved: p.position !== a.pos,
-        injured: isInjured(meta),
-        talentSynergies: findTalentSynergies(p, meta, pitcherMeta, a.pos, assigned, metaStore),
-      });
-    } else {
-      assignments.push({
+      if (a) {
+        const sim = effectiveStats(meta);
+        const { breakdown } = positionScore(a.pos, sim, meta, statWeights, p);
+        const curPos = p.position as FieldPosition | undefined;
+        const currentPosScore = curPos && FIELD_POSITIONS.includes(curPos as FieldPosition)
+          ? Math.round(positionScore(curPos as FieldPosition, sim, meta, statWeights, p).score + empBonus(curPos as FieldPosition, p.uuid))
+          : undefined;
+        list.push({
+          player: p,
+          position: a.pos,
+          positionScore: Math.round(a.score),
+          currentPositionScore: currentPosScore,
+          empiricalAdj: empBonus(a.pos, p.uuid) || undefined,
+          reason: a.reason,
+          breakdown,
+          currentPosition: p.position ?? undefined,
+          moved: p.position !== a.pos,
+          injured: isInjured(meta),
+          talentSynergies: findTalentSynergies(p, meta, pitcherMeta, a.pos, assigned, metaStore),
+        });
+      } else {
+        list.push({
+          player: p,
+          position: p.position ?? 'BN',
+          positionScore: 0,
+          reason: 'No open position fit',
+          breakdown: [],
+          currentPosition: p.position ?? undefined,
+          moved: false,
+          injured: isInjured(meta),
+          talentSynergies: [],
+        });
+      }
+    }
+
+    for (const p of withoutSim) {
+      list.push({
         player: p,
         position: p.position ?? 'BN',
         positionScore: 0,
-        reason: 'No open position fit',
+        reason: 'Kept current (no sim stats)',
         breakdown: [],
         currentPosition: p.position ?? undefined,
         moved: false,
-        injured: isInjured(metaStore[p.uuid!]),
+        injured: false,
         talentSynergies: [],
       });
     }
-  }
 
-  for (const p of withoutSim) {
-    assignments.push({
-      player: p,
-      position: p.position ?? 'BN',
-      positionScore: 0,
-      reason: 'Kept current (no sim stats)',
-      breakdown: [],
-      currentPosition: p.position ?? undefined,
-      moved: false,
-      injured: false,
-      talentSynergies: [],
-    });
+    list.sort((a, b) =>
+      (posOrder.get(a.position as FieldPosition) ?? 99) - (posOrder.get(b.position as FieldPosition) ?? 99),
+    );
+    return list;
+  };
+
+  const options: FieldOption[] = topK.map(({ score, perm: permVec }) => ({
+    assignments: buildAssignments(permVec),
+    totalScore: Math.round(score),
+  }));
+
+  // The best option drives batting order, bench upgrades, and back-compat.
+  const assignments = options[0]?.assignments ?? [];
+
+  // Importance-weighted fit of the CURRENT setup, for a "vs current" delta.
+  const currentMap = new Map<string, { pos: FieldPosition; score: number; reason: string }>();
+  for (const p of withSim) {
+    const curPos = p.position as FieldPosition | undefined;
+    if (curPos && FIELD_POSITIONS.includes(curPos)) {
+      currentMap.set(p.uuid!, { pos: curPos, ...lookupScore(p.uuid!, curPos) });
+    }
   }
+  const currentTotalScore = Math.round(assignmentObjective(currentMap));
 
   // Build bench list
   const benchAssignments: RosterAssignment[] = benchPlayers.map((p) => ({
@@ -491,13 +550,14 @@ export function optimizeRoster(
       const pos = a.position as FieldPosition;
       if (!FIELD_POSITIONS.includes(pos)) continue;
       const benchFit = positionScore(pos, bSim, bMeta, statWeights, bp);
-      const gain = Math.round(benchFit.score) - a.positionScore;
+      const benchScoreWithEmp = benchFit.score + empBonus(pos, bp.uuid);
+      const gain = Math.round(benchScoreWithEmp) - a.positionScore;
       if (gain > 0) {
         benchUpgrades.push({
           benchPlayer: bp,
           replacesPlayer: a.player,
           position: pos,
-          benchScore: Math.round(benchFit.score),
+          benchScore: Math.round(benchScoreWithEmp),
           starterScore: a.positionScore,
           gain,
         });
@@ -520,9 +580,5 @@ export function optimizeRoster(
   };
   const battingOrder = recommendBattingOrder(virtualTeam, metaStore);
 
-  // Sort assignments by position priority for display
-  const posOrder = new Map(positionPriority.map((p, i) => [p, i]));
-  assignments.sort((a, b) => (posOrder.get(a.position as FieldPosition) ?? 99) - (posOrder.get(b.position as FieldPosition) ?? 99));
-
-  return { assignments, bench: benchAssignments, benchUpgrades, battingOrder, warnings };
+  return { assignments, options, currentTotalScore, bench: benchAssignments, benchUpgrades, battingOrder, warnings };
 }
