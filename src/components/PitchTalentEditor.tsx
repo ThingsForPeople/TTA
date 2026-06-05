@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { CATEGORY_COLORS, type TalentDef } from '../lib/talents';
 import { PITCH_SUB_TALENTS, PITCH_TYPE_TALENTS } from '../lib/talentClassify';
-import type { PitchTalent } from '../lib/playerMeta';
+import { MAX_TALENT_LEVEL, type PitchTalent } from '../lib/playerMeta';
 
 interface Props {
   pitchTalents: PitchTalent[];
@@ -17,7 +17,7 @@ function LevelButtons({
 }) {
   return (
     <span className="inline-flex gap-px rounded bg-slate-900 px-0.5">
-      {[1, 2, 3].map((n) => (
+      {Array.from({ length: MAX_TALENT_LEVEL }, (_, i) => i + 1).map((n) => (
         <button
           key={n}
           type="button"

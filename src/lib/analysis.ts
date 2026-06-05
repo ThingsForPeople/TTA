@@ -1,4 +1,4 @@
-import type { PlayerMetaStore } from './playerMeta';
+import { MAX_TALENT_LEVEL, type PlayerMetaStore } from './playerMeta';
 import type { Player, Team } from './types';
 import { ZONE_HIT_EFFECT, type ZoneHitEffect } from './talentEffects';
 
@@ -86,9 +86,18 @@ function profile(p: Player): PlayerProfile | undefined {
 // won't leapfrog someone with clearly better stats.
 //
 // Values are in wOBA-equivalent units, scaled by TALENT_WEIGHT (0.15)
-// so a fully-loaded Lv3 talent adds ~0.006 wOBA to the slot score.
+// so a Lv3 talent adds ~0.006 wOBA to the slot score (more at Lv4/Lv5).
 
 type SlotRole = 'leadoff' | 'quality' | 'best' | 'cleanup' | 'protection' | 'lower';
+
+// Batting-order optimization modes. Stat-heavy (default) is PURE wOBA/role
+// scoring — talents have zero influence on placement and slot-locks (e.g. The
+// Janitor → cleanup) are ignored. Talent-heavy turns the locks back on and
+// amplifies the talent + baserunning contribution so slot-affinity talents
+// drive placement (a player lands in his talent's preferred slot unless a
+// clearly better bat outweighs it).
+export type BattingMode = 'stat' | 'talent';
+const TALENT_MODE_MULT: Record<BattingMode, number> = { stat: 0, talent: 5 };
 
 const TALENT_WEIGHT = 0.15;
 
@@ -181,7 +190,8 @@ for (const prefix of ZONE_DIR_PREFIXES) {
   }
 }
 
-const LEVEL_SCALE = [0, 1.0, 1.5, 2.0];
+// Index by talent level (1-MAX_TALENT_LEVEL); +0.5 per level above Lv1.
+const LEVEL_SCALE = [0, 1.0, 1.5, 2.0, 2.5, 3.0];
 
 function talentBonus(
   playerUuid: string | undefined,
@@ -197,7 +207,7 @@ function talentBonus(
     const tv = TALENT_VALUES[talentName];
     if (!tv) continue;
     const lvl = meta.talentLevels?.[talentName] ?? 1;
-    const scale = LEVEL_SCALE[Math.min(lvl, 3)] ?? 1;
+    const scale = LEVEL_SCALE[Math.min(lvl, MAX_TALENT_LEVEL)] ?? 1;
     const roleVal = tv.roles[role] ?? 0;
     const globalVal = tv.global ?? 0;
     bonus += (roleVal + globalVal) * scale;
@@ -230,14 +240,19 @@ function baserunningBonus(
     const rv = BASERUNNING_VALUES[talentName];
     if (!rv) continue;
     const lvl = meta.talentLevels?.[talentName] ?? 1;
-    const scale = LEVEL_SCALE[Math.min(lvl, 3)] ?? 1;
+    const scale = LEVEL_SCALE[Math.min(lvl, MAX_TALENT_LEVEL)] ?? 1;
     bonus += (rv[role] ?? 0) * scale;
   }
   return bonus * TALENT_WEIGHT;
 }
 
-function totalTalentBonus(uuid: string | undefined, ms: PlayerMetaStore, role: SlotRole): number {
-  return talentBonus(uuid, ms, role) + baserunningBonus(uuid, ms, role);
+function totalTalentBonus(
+  uuid: string | undefined,
+  ms: PlayerMetaStore,
+  role: SlotRole,
+  mult = 1,
+): number {
+  return (talentBonus(uuid, ms, role) + baserunningBonus(uuid, ms, role)) * mult;
 }
 
 export function getSlotTalents(
@@ -316,9 +331,9 @@ const SLOT_LOCKED_TALENTS: Record<string, number> = {
 // Fill priority for the greedy seed (refined afterward by 2-opt).
 const SLOT_SEED_PRIORITY = [3, 1, 2, 4, 5, 8, 6, 7, 9];
 
-function slotFit(p: Player, slot: number, ms: PlayerMetaStore): number {
+function slotFit(p: Player, slot: number, ms: PlayerMetaStore, mult = 1): number {
   const role = SLOT_ROLES[slot];
-  const tb = totalTalentBonus(p.uuid, ms, role);
+  const tb = totalTalentBonus(p.uuid, ms, role, mult);
   const pr = profile(p);
   if (!pr) return tb; // no stats yet → sorts to the bottom, still placeable
   switch (slot) {
@@ -343,7 +358,9 @@ function slotFit(p: Player, slot: number, ms: PlayerMetaStore): number {
 function buildBattingOrder(
   team: Team,
   ms: PlayerMetaStore,
+  mode: BattingMode = 'stat',
 ): BattingOrderResult {
+  const mult = TALENT_MODE_MULT[mode];
   const all = team.players ?? [];
   const benched = all.filter((p) => p.bench === true);
   const active = all.filter((p) => p.bench !== true);
@@ -357,12 +374,14 @@ function buildBattingOrder(
     !!p.uuid && !!ms[p.uuid]?.talents?.includes(t);
 
   // 1. Hard-pin slot-locked talents — best holder claims the locked slot.
+  //    Only in talent-heavy mode; stat-heavy is pure stats (no talent overrides).
+  const useLocks = mode === 'talent';
   const lockedHolders = new Map<number, Player>(); // slot → player
   const lockedPlayers = new Set<Player>();
-  for (const [talent, slot] of Object.entries(SLOT_LOCKED_TALENTS)) {
+  for (const [talent, slot] of useLocks ? Object.entries(SLOT_LOCKED_TALENTS) : []) {
     if (slot > numSlots || lockedHolders.has(slot)) continue;
     const holders = active.filter((p) => hasTalent(p, talent) && !lockedPlayers.has(p));
-    const best = pickHighest(holders, (p) => slotFit(p, slot, ms));
+    const best = pickHighest(holders, (p) => slotFit(p, slot, ms, mult));
     if (best) {
       lockedHolders.set(slot, best);
       lockedPlayers.add(best);
@@ -383,7 +402,7 @@ function buildBattingOrder(
   for (const [slot, p] of lockedHolders) { assign.set(slot, p); used.add(p); }
   for (const slot of SLOT_SEED_PRIORITY) {
     if (slot > numSlots || assign.has(slot)) continue;
-    const pick = pickHighest(starters.filter((p) => !used.has(p)), (p) => slotFit(p, slot, ms));
+    const pick = pickHighest(starters.filter((p) => !used.has(p)), (p) => slotFit(p, slot, ms, mult));
     if (pick) { assign.set(slot, pick); used.add(pick); }
   }
   for (const slot of slotList) {
@@ -395,7 +414,7 @@ function buildBattingOrder(
   // 3b. Objective = total slot fit (talent value is already inside slotFit).
   const objective = (a: Map<number, Player>): number => {
     let s = 0;
-    for (const [slot, p] of a) s += slotFit(p, slot, ms);
+    for (const [slot, p] of a) s += slotFit(p, slot, ms, mult);
     return s;
   };
 
@@ -426,9 +445,11 @@ function buildBattingOrder(
     .map((slot) => {
       const player = assign.get(slot)!;
       let reason = SLOT_REASON[slot];
-      for (const [talent, lockedSlot] of Object.entries(SLOT_LOCKED_TALENTS)) {
-        if (lockedSlot === slot && hasTalent(player, talent)) {
-          reason = `#${slot} — ${talent} (talent locks here)`;
+      if (useLocks) {
+        for (const [talent, lockedSlot] of Object.entries(SLOT_LOCKED_TALENTS)) {
+          if (lockedSlot === slot && hasTalent(player, talent)) {
+            reason = `#${slot} — ${talent} (talent locks here)`;
+          }
         }
       }
       return {
@@ -444,8 +465,12 @@ function buildBattingOrder(
   return { recommended, benched };
 }
 
-export function recommendBattingOrder(team: Team, metaStore?: PlayerMetaStore): BattingOrderResult {
-  return buildBattingOrder(team, metaStore ?? {});
+export function recommendBattingOrder(
+  team: Team,
+  metaStore?: PlayerMetaStore,
+  mode: BattingMode = 'stat',
+): BattingOrderResult {
+  return buildBattingOrder(team, metaStore ?? {}, mode);
 }
 
 export interface ColumnExtremes {

@@ -36,7 +36,14 @@ const MATCHUP_PROMPT =
   '1. HOW WE FARE — the overall pattern vs this opponent (winning/losing, by how much, trending which way).\n' +
   '2. WHAT THEY DO TO US — recurring problems across these games (their pitching gives our bats trouble? they tee off on our pitching? a repeating inning/situation?).\n' +
   '3. WHAT WORKS FOR US — what has gone right that we should lean into.\n' +
-  '4. ADJUSTMENTS — 2-3 concrete things to try next time (lineup, pitching, positioning).\n\n' +
+  '4. ADJUSTMENTS — 2-3 concrete things to try next time.\n\n' +
+  'CRITICAL CONSTRAINT — the ONLY two things I can change between games are (a) the BATTING ORDER ' +
+  '(who hits in which of the 9 slots) and (b) FIELD POSITIONING (which player plays which defensive ' +
+  'position). I CANNOT change pitch selection/usage, a pitcher’s pitch arsenal, player talents, sim ' +
+  'stats, archetypes, or which pitcher starts — none of those are adjustable, so do NOT recommend them. ' +
+  'Every adjustment in section 4 must be a batting-order or field-positioning move. You may still note ' +
+  'observations about pitching/contact in sections 1-3 as context, but frame the actual recommendations ' +
+  'purely around lineup and defensive alignment.\n\n' +
   'Small sample — don’t overstate. Be concise — bullets, not paragraphs.';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -58,35 +65,45 @@ function windowBounds(filter: TimeFilter, now: Date): { start?: number; end?: nu
 export function Matchups({ teamUuid }: { teamUuid: string }) {
   const [games, setGames] = useState<GameRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedOpp, setSelectedOpp] = useState<string>('');
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('all');
   const [countN, setCountN] = useState(0); // 0 = all
   const [activeGameId, setActiveGameId] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    const cached = gamesCache.get(teamUuid);
-    if (cached && Date.now() - cached.ts < GAMES_TTL_MS) {
-      setGames(cached.games);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    fetch(`/api/team/${teamUuid}/games`)
-      .then(async (res) => {
+  // Fetch the games list. `force` bypasses the session cache (and asks the
+  // route to skip its caches) so the Refresh button can pull newly-played games.
+  const loadGames = useCallback(
+    async (force = false) => {
+      if (!force) {
+        const cached = gamesCache.get(teamUuid);
+        if (cached && Date.now() - cached.ts < GAMES_TTL_MS) {
+          setGames(cached.games);
+          setLoading(false);
+          return;
+        }
+      }
+      if (force) setRefreshing(true); else setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/team/${teamUuid}/games${force ? '?fresh=1' : ''}`, force ? { cache: 'no-store' } : undefined);
         const json = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
-        return (json.games ?? []) as GameRow[];
-      })
-      .then((rows) => {
+        const rows = (json.games ?? []) as GameRow[];
         gamesCache.set(teamUuid, { games: rows, ts: Date.now() });
-        if (!cancelled) { setGames(rows); setLoading(false); }
-      })
-      .catch((err) => { if (!cancelled) { setError(err instanceof Error ? err.message : String(err)); setLoading(false); } });
-    return () => { cancelled = true; };
-  }, [teamUuid]);
+        setGames(rows);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [teamUuid],
+  );
+
+  useEffect(() => { loadGames(); }, [loadGames]);
 
   // Opponents faced, most-recently-played first.
   const opponents = useMemo(() => {
@@ -151,7 +168,18 @@ export function Matchups({ teamUuid }: { teamUuid: string }) {
     <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-4">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300">Matchups</h2>
-        <span className="text-[10px] text-slate-500">{games.length} games loaded</span>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-slate-500">{games.length} games loaded</span>
+          <button
+            type="button"
+            onClick={() => loadGames(true)}
+            disabled={loading || refreshing}
+            title="Fetch newly-played games"
+            className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-300 transition-colors hover:border-emerald-500 hover:text-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
       </div>
       <p className="mb-3 text-xs text-slate-500">
         Analyze your record and games against a specific opponent. Filter by time window and game count.

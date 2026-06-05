@@ -182,6 +182,7 @@ export function AppShell({
           <TrainingPanel team={team} metaStore={metaStore} historyVersion={statHistoryVersion} />
           <RosterEditor
             team={team}
+            teamUuid={uuid}
             metaStore={metaStore}
             onChange={onMetaStoreChange}
             onHistoryChange={() => setStatHistoryVersion((v) => v + 1)}
@@ -206,10 +207,12 @@ export function AppShell({
           />
         </div>
 
-        {/* Mounted lazily so its games fetch only fires when opened. */}
+        {/* Mounted lazily so its games fetch only fires when opened. Keyed on
+            uuid so switching the viewed team fully resets its internal state
+            (selected opponent, filters) rather than keeping the old team's. */}
         {tab === 'matchups' && (
           <div className="space-y-4">
-            <Matchups teamUuid={uuid} />
+            <Matchups key={uuid} teamUuid={uuid} />
           </div>
         )}
 

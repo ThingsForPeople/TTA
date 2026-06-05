@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ALL_TALENTS, CATEGORY_COLORS, type TalentDef } from '../lib/talents';
+import { MAX_TALENT_LEVEL } from '../lib/playerMeta';
 
 interface Props {
   selected: string[];
@@ -104,7 +105,7 @@ export function TalentPicker({ selected, levels, onChange, onLevelChange, availa
               >
                 <span className={catColor}>{t}</span>
                 <span className="inline-flex gap-px rounded bg-slate-900 px-0.5">
-                  {[1, 2, 3].map((n) => (
+                  {Array.from({ length: MAX_TALENT_LEVEL }, (_, i) => i + 1).map((n) => (
                     <button
                       key={n}
                       type="button"

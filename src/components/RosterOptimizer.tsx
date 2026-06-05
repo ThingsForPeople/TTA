@@ -15,7 +15,7 @@ import {
   type StatWeights,
   type StatBreakdown,
 } from '../lib/rosterOptimizer';
-import { getSlotTalents, type BattingSlotRole } from '../lib/analysis';
+import { getSlotTalents, type BattingMode, type BattingSlotRole } from '../lib/analysis';
 import { TALENT_BY_NAME } from '../lib/talents';
 import { buildFieldingGrades, type FieldingGrades } from '../lib/fieldingGrades';
 import type { AggregatedPlayer } from '../lib/parseReplay';
@@ -36,10 +36,11 @@ function useOptimization(
   positionImportance?: Record<string, number>,
   statWeights?: StatWeights,
   fieldingGrades?: FieldingGrades,
+  battingMode: BattingMode = 'stat',
 ): RosterOptimization {
   return useMemo(
-    () => optimizeRoster(team, metaStore, positionImportance, statWeights, fieldingGrades),
-    [team, metaStore, positionImportance, statWeights, fieldingGrades],
+    () => optimizeRoster(team, metaStore, positionImportance, statWeights, fieldingGrades, battingMode),
+    [team, metaStore, positionImportance, statWeights, fieldingGrades, battingMode],
   );
 }
 
@@ -475,12 +476,37 @@ export function FieldPositionsPanel({ team, metaStore, teamUuid, dataVersion = 0
 // ── Batting Order Panel ──────────────────────────────────────────────
 
 export function OptimalBattingOrder({ team, metaStore }: Props) {
-  const { battingOrder: displayOrder } = useOptimization(team, metaStore);
+  const [mode, setMode] = useState<BattingMode>('stat');
+  const { battingOrder: displayOrder } = useOptimization(
+    team, metaStore, undefined, undefined, undefined, mode,
+  );
 
   return (
     <CollapsiblePanel
       title="Recommended batting order"
-      subtitle="wOBA + role-based slot scoring (talent slot-affinity included). ▲ moved up · ▼ moved down from current slot."
+      subtitle={
+        mode === 'stat'
+          ? 'Stat-heavy: pure wOBA + role-based slot scoring; talents and slot-locks ignored. ▲ moved up · ▼ moved down from current slot.'
+          : 'Talent-heavy: slot-affinity talents + locks drive placement; wOBA only overrides on a clear gap. ▲ moved up · ▼ moved down from current slot.'
+      }
+      headerAction={
+        <div className="flex rounded border border-slate-700 text-xs">
+          {(['stat', 'talent'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setMode(m)}
+              title={m === 'stat' ? 'Talents are tiebreakers on top of stats' : 'Weight talents heavily so they drive slot placement'}
+              className={
+                'px-2 py-0.5 transition-colors first:rounded-l last:rounded-r ' +
+                (mode === m ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-200')
+              }
+            >
+              {m === 'stat' ? 'Stat-heavy' : 'Talent-heavy'}
+            </button>
+          ))}
+        </div>
+      }
     >
       {displayOrder.recommended.length === 0 ? (
         <p className="text-sm text-slate-400">No active players found.</p>

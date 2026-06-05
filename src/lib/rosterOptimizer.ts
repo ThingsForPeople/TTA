@@ -7,8 +7,9 @@ import {
   effectiveStats,
   isInjured,
   hasSim,
+  MAX_TALENT_LEVEL,
 } from './playerMeta';
-import { recommendBattingOrder, type BattingOrderResult } from './analysis';
+import { recommendBattingOrder, type BattingMode, type BattingOrderResult } from './analysis';
 import { empiricalFieldingBonus, type FieldingGrades } from './fieldingGrades';
 
 export interface StatBreakdown {
@@ -88,15 +89,15 @@ export const DEFAULT_POSITION_IMPORTANCE: Record<string, number> = {
   RF:  1.00,
   LF:  0.95,
   C:   0.95,
-  '1B': 0.80,
+  '1B': 0.70, // lowest by a clear margin — the bat-dump spot; workload over-credits it
 };
 
 // ── Fielding talent bonus system ─────────────────────────────────────
 // No raw defensive stats exist beyond sim stats, so fielding talents
 // have meaningful weight on position fit (~10-20 points per Lv1 talent).
-// Lv2 = 1.25x, Lv3 = 1.5x (magnitude of level gains is unknown, kept conservative).
-
-const FIELDING_LEVEL_SCALE = [0, 1.0, 1.25, 1.5];
+// Lv2 = 1.25x, Lv3 = 1.5x … +0.25x per level (magnitude of level gains is
+// unknown, kept conservative). Indexed by level (1-MAX_TALENT_LEVEL).
+const FIELDING_LEVEL_SCALE = [0, 1.0, 1.25, 1.5, 1.75, 2.0];
 
 const INFIELD_POSITIONS = new Set<FieldPosition>(['C', '1B', '2B', 'SS', '3B']);
 const OUTFIELD_POSITIONS = new Set<FieldPosition>(['LF', 'CF', 'RF']);
@@ -126,7 +127,7 @@ function fieldingTalentBonus(pos: FieldPosition, meta: PlayerMeta | undefined): 
     if (!rule) continue;
     if (rule.positions !== 'all' && !rule.positions.has(pos)) continue;
     const lvl = meta.talentLevels?.[talentName] ?? 1;
-    const scale = FIELDING_LEVEL_SCALE[Math.min(lvl, 3)] ?? 1;
+    const scale = FIELDING_LEVEL_SCALE[Math.min(lvl, MAX_TALENT_LEVEL)] ?? 1;
     const posExtra = rule.posBonus?.[pos] ?? 0;
     bonus += (rule.bonus + posExtra) * scale;
     matched.push(lvl > 1 ? `${talentName} Lv${lvl}` : talentName);
@@ -164,7 +165,7 @@ function comboBonus(
           return meta?.talentLevels?.[combo.talent] ?? 1;
         }),
       );
-      const scale = FIELDING_LEVEL_SCALE[Math.min(minLevel, 3)] ?? 1;
+      const scale = FIELDING_LEVEL_SCALE[Math.min(minLevel, MAX_TALENT_LEVEL)] ?? 1;
       bonus += combo.pairBonus * scale;
     }
   }
@@ -181,7 +182,7 @@ function comboBonus(
           const catcherLvl = meta.talentLevels?.[t] ?? 1;
           const pitcherLvl = pitcherMeta.talentLevels?.[t] ?? 1;
           const minLvl = Math.min(catcherLvl, pitcherLvl);
-          const scale = FIELDING_LEVEL_SCALE[Math.min(minLvl, 3)] ?? 1;
+          const scale = FIELDING_LEVEL_SCALE[Math.min(minLvl, MAX_TALENT_LEVEL)] ?? 1;
           bonus += BATTERY_COMBO_BONUS * scale;
         }
       }
@@ -196,15 +197,21 @@ export type StatWeights = Record<string, Record<string, number>>;
 // In-sim stat meanings: FLD = catch chance + throw-exchange (hands/transfer),
 // ARM = throw velocity, SPD = fielding range + baserunning. Each row sums to
 // 1.0 so positions stay comparable (baseScore = Σ statValue × weight).
+// Tuned to THIS sim, not real MLB. Two empirical findings drive the shape:
+//  • Infielders convert grounders ~95-100% regardless of range — the THROW
+//    (and the DP relay) is what makes the out, so ARM leads across the infield.
+//  • Outfield balls land in the in-doubt range band — SPD/range carries the
+//    leverage by a wide margin; the OF arm is mostly invisible deterrence, so
+//    it ranks second, roughly even with FLD.
 export const DEFAULT_STAT_WEIGHTS: StatWeights = {
-  SS:  { fld: 0.35, arm: 0.30, spd: 0.35 }, // needs all three; long throws from the hole
-  CF:  { fld: 0.20, arm: 0.15, spd: 0.65 }, // range is the whole job
-  '2B': { fld: 0.45, arm: 0.10, spd: 0.45 }, // hands/exchange for the DP turn; short throws
-  '3B': { fld: 0.30, arm: 0.50, spd: 0.20 }, // hot corner; long throw across the diamond
-  RF:  { fld: 0.30, arm: 0.40, spd: 0.30 }, // strongest OF arm
-  LF:  { fld: 0.35, arm: 0.15, spd: 0.50 }, // range-first, weakest-arm OF spot
-  C:   { fld: 0.45, arm: 0.45, spd: 0.10 }, // receiving/blocking (FLD) + caught-stealing (ARM)
-  '1B': { fld: 0.55, arm: 0.05, spd: 0.40 }, // receiving/scooping; barely throws
+  SS:  { fld: 0.27, arm: 0.40, spd: 0.33 }, // arm #1 (throw from the hole + DP), range close
+  '2B': { fld: 0.32, arm: 0.40, spd: 0.28 }, // arm #1 for the pivot/throw; hands for the turn
+  '3B': { fld: 0.26, arm: 0.52, spd: 0.22 }, // hot-corner cannon; arm dominant
+  C:   { fld: 0.42, arm: 0.48, spd: 0.10 }, // caught-stealing arm #1, receiving close
+  '1B': { fld: 0.55, arm: 0.10, spd: 0.35 }, // receiver — scoops throws, barely throws
+  CF:  { fld: 0.18, arm: 0.20, spd: 0.62 }, // speed by a longshot; arm ≈ fld
+  LF:  { fld: 0.19, arm: 0.21, spd: 0.60 }, // speed by a longshot; arm ≈ fld
+  RF:  { fld: 0.20, arm: 0.24, spd: 0.56 }, // speed-led; slightly stronger arm than LF/CF
 };
 
 const STAT_LABELS: Record<string, string> = { fld: 'FLD', arm: 'ARM', spd: 'SPD' };
@@ -331,6 +338,7 @@ export function optimizeRoster(
   positionImportance?: Record<string, number>,
   statWeights?: StatWeights,
   fieldingGrades?: FieldingGrades,
+  battingMode: BattingMode = 'stat',
 ): RosterOptimization {
   const warnings: string[] = [];
   // How much each position values arm strength (drives the transferable arm
@@ -578,7 +586,7 @@ export function optimizeRoster(
     players: [...virtualPlayers, ...benchPlayers.map((b) => ({ ...b, bench: true }))],
     pitcher,
   };
-  const battingOrder = recommendBattingOrder(virtualTeam, metaStore);
+  const battingOrder = recommendBattingOrder(virtualTeam, metaStore, battingMode);
 
   return { assignments, options, currentTotalScore, bench: benchAssignments, benchUpgrades, battingOrder, warnings };
 }

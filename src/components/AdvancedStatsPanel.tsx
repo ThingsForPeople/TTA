@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { CollapsiblePanel } from './CollapsiblePanel';
 import type { AggregatedPlayer, PositionImportance, PlayerPositionSplit } from '../lib/parseReplay';
 import { DEFAULT_POSITION_IMPORTANCE, DEFAULT_STAT_WEIGHTS, type StatWeights } from '../lib/rosterOptimizer';
+import { maxAssignment } from '../lib/assign';
 
 interface Props {
   teamUuid: string;
@@ -27,8 +28,14 @@ function effImp(pi: PositionImportance): number {
   return DEFAULT_POSITION_IMPORTANCE[pi.position] ?? 1;
 }
 
-type View = 'fielding' | 'batting' | 'positions';
-const VIEW_LABEL: Record<View, string> = { fielding: 'fielding', batting: 'batting', positions: 'by position' };
+type View = 'fielding' | 'batting' | 'positions' | 'alignment' | 'heatmap';
+const VIEW_LABEL: Record<View, string> = { fielding: 'fielding', batting: 'batting', positions: 'by position', alignment: 'best alignment', heatmap: 'heat map' };
+
+// Fielded-ball heat bin (mirrors the route's HeatBin). x,y are integer field
+// coords (origin = home plate, +x = RF side, −y = deeper).
+interface HeatBin { x: number; y: number; pos: string; outs: number; hits: number }
+// Opponent spray bin — where balls were HIT against us (no position dimension).
+interface SprayBin { x: number; y: number; outs: number; hits: number }
 
 // Canonical fielding position order, as scorekeeping numbers (C,1B,2B,SS,3B,LF,CF,RF).
 const POS_NUM_ORDER = [2, 3, 4, 6, 5, 7, 8, 9];
@@ -149,6 +156,135 @@ function CatcherCompare({ rows }: { rows: { name: string; s: PlayerPositionSplit
   );
 }
 
+// ── Best alignment ───────────────────────────────────────────────────
+// Optimal player→position assignment over the context-corrected PAE matrix:
+// each fielder fills one spot, total importance-weighted value maximized. This
+// is the "best overall team composition" read — unlike "best player per
+// position" (which picks each column independently and can double-book a player
+// who's tops at two spots). Only positions a player has actually fielded are
+// eligible (PAE can't score reps that don't exist). Replay-only; the Overview
+// optimizer is the sim-stat-aware counterpart that also benefits from the fix.
+interface AlignSlot {
+  posNum: number;
+  importance: number;
+  name: string | null;
+  split: PlayerPositionSplit | null;
+  low: boolean;
+  csRate: number | null; // catcher only
+}
+
+function computeAlignment(players: AggregatedPlayer[], posImp: PositionImportance[]): { slots: AlignSlot[]; benched: string[] } {
+  // Importance keyed by scorekeeping number (posImp is keyed by label string).
+  const labelToNum = new Map(Object.entries(POS_LABEL).map(([n, s]) => [s, Number(n)]));
+  const impByNum = new Map<number, number>();
+  for (const pi of posImp) {
+    const num = labelToNum.get(pi.position);
+    if (num) impByNum.set(num, effImp(pi));
+  }
+  const imp = (posNum: number) => impByNum.get(posNum) ?? 1;
+
+  const eligibleSplit = (s: PlayerPositionSplit) => (s.position === 2 ? s.stealAttempts > 0 : s.chances > 0);
+  const candidates = players
+    .map((p) => ({ p, splits: (p.byPosition ?? []).filter(eligibleSplit) }))
+    .filter((c) => c.splits.length > 0);
+
+  // Team mean CS rate, for the catcher's steal-defense value (no batted-ball PAE).
+  let csCaught = 0, csAtt = 0;
+  for (const c of candidates) for (const s of c.splits) {
+    if (s.position === 2) { csCaught += s.caughtStealing; csAtt += s.stealAttempts; }
+  }
+  const meanCs = csAtt > 0 ? csCaught / csAtt : 0;
+
+  const splitAt = (c: (typeof candidates)[number], posNum: number) => c.splits.find((s) => s.position === posNum) ?? null;
+  // Per-game value in PAE-equivalent units: PAE/game for fielders; caught-
+  // stealing above the team average per game for the catcher.
+  const perGameValue = (s: PlayerPositionSplit): number => {
+    if (s.position === 2) {
+      const above = s.caughtStealing - meanCs * s.stealAttempts;
+      return s.games > 0 ? above / s.games : 0;
+    }
+    return s.paePerGame;
+  };
+
+  // weight[positionRow][candidateCol] = importance × per-game value, null if the
+  // player never fielded that spot.
+  const weight: (number | null)[][] = POS_NUM_ORDER.map((posNum) =>
+    candidates.map((c) => {
+      const s = splitAt(c, posNum);
+      return s ? imp(posNum) * perGameValue(s) : null;
+    }),
+  );
+
+  const rowToCol = maxAssignment(weight);
+  const assignedCols = new Set<number>();
+  const slots: AlignSlot[] = POS_NUM_ORDER.map((posNum, i) => {
+    const col = rowToCol[i];
+    if (col == null || col < 0) return { posNum, importance: imp(posNum), name: null, split: null, low: false, csRate: null };
+    assignedCols.add(col);
+    const c = candidates[col];
+    const s = splitAt(c, posNum)!;
+    const low = posNum === 2 ? s.stealAttempts < MIN_STEAL_ATT : s.games < MIN_SPLIT_GAMES || s.chances < MIN_SPLIT_CHANCES;
+    const csRate = posNum === 2 && s.stealAttempts > 0 ? s.caughtStealing / s.stealAttempts : null;
+    return { posNum, importance: imp(posNum), name: c.p.name, split: s, low, csRate };
+  });
+
+  const benched = candidates.filter((_, idx) => !assignedCols.has(idx)).map((c) => c.p.name);
+  return { slots, benched };
+}
+
+function BestAlignment({ players, posImp }: { players: AggregatedPlayer[]; posImp: PositionImportance[] }) {
+  const { slots, benched } = useMemo(() => computeAlignment(players, posImp), [players, posImp]);
+  if (!slots.some((s) => s.name)) return <p className="text-sm text-slate-400">No fielding data yet — sync replays first.</p>;
+  return (
+    <div className="space-y-3">
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-xs">
+          <thead>
+            <tr className="border-b border-slate-800 text-[10px] uppercase tracking-wider text-slate-500">
+              <th className="px-2 py-1 text-left">Pos</th>
+              <th className="px-2 py-1 text-left">Player</th>
+              <th className="px-1.5 py-1 text-right" title="Derived position importance (higher = defense matters more here)">Imp</th>
+              <th className="px-1.5 py-1 text-right">G</th>
+              <th className="px-1.5 py-1 text-right" title="Plays above expected per game at this spot (context-corrected), or steal-prevention for C">Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            {slots.map((s) => (
+              <tr key={s.posNum} className={'border-b border-slate-800/60 last:border-0 ' + (s.name ? (s.low ? 'text-slate-500' : 'text-slate-200') : 'text-amber-400/80')}>
+                <td className="px-2 py-1 font-medium text-slate-300">{POS_LABEL[s.posNum] ?? s.posNum}</td>
+                <td className="px-2 py-1 whitespace-nowrap">
+                  {s.name ?? '— no data'}
+                  {s.low && <span title="Low sample — treat as rough"> ~</span>}
+                </td>
+                <td className="px-1.5 py-1 text-right font-mono text-slate-400">{s.importance.toFixed(2)}</td>
+                <td className="px-1.5 py-1 text-right font-mono text-slate-400">{s.split ? s.split.games : '·'}</td>
+                <td className="px-1.5 py-1 text-right font-mono text-slate-300">
+                  {s.split == null
+                    ? '·'
+                    : s.posNum === 2
+                      ? (s.csRate == null ? '·' : Math.round(s.csRate * 100) + '% CS')
+                      : signed1(s.split.paePerGame)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {benched.length > 0 && (
+        <p className="text-[11px] text-slate-500">
+          Not in the optimal alignment: <span className="text-slate-400">{benched.join(', ')}</span>.
+        </p>
+      )}
+      <p className="text-[10px] text-slate-600">
+        Optimal player→position assignment (each player one spot) maximizing importance-weighted, context-corrected
+        PAE/game. Only positions a player has <em>actually fielded</em> are eligible — PAE can’t score a spot with no
+        reps (shown “no data”). Values are position-relative (≈0 = average fielder there); small samples are noisy
+        (<span className="text-slate-500">~</span>); the catcher is ranked by steal prevention, not batted-ball PAE.
+      </p>
+    </div>
+  );
+}
+
 interface Column {
   key: string;
   label: string;
@@ -250,10 +386,137 @@ function PositionBreakdown({ player, colSpan }: { player: AggregatedPlayer; colS
   );
 }
 
+// Fielder home positions (scorekeeping spots), for orienting the heat map.
+// Same coordinate space as the bins: origin = home plate, +x = RF side, −y deeper.
+const FIELD_HOMES: { pos: string; x: number; y: number }[] = [
+  { pos: 'P', x: 0, y: -19 }, { pos: 'C', x: 0, y: 3 },
+  { pos: '1B', x: 19, y: -26 }, { pos: '2B', x: 9, y: -44 }, { pos: '3B', x: -19, y: -26 },
+  { pos: 'SS', x: -10, y: -43 }, { pos: 'LF', x: -30, y: -59 }, { pos: 'CF', x: -1, y: -78 }, { pos: 'RF', x: 30, y: -59 },
+];
+// Field → SVG: x∈[−52,52]→[0,104], y∈[−100,8]→[108,0] (home at bottom, OF at top).
+const HM_W = 104, HM_H = 108, HM_CELL = 4;
+const fx = (x: number) => x + 52;
+const fy = (y: number) => y + 100;
+
+type Cell = { x: number; y: number; outs: number; hits: number };
+
+// Presentational field plot: home plate bottom-center, OF up top, faint
+// position markers for orientation. Cell color = out-rate (green=out, red=hit),
+// brightness = volume.
+function FieldHeat({ cells, label }: { cells: Cell[]; label: string }) {
+  const maxN = Math.max(1, ...cells.map((c) => c.outs + c.hits));
+  return (
+    <svg viewBox={`0 0 ${HM_W} ${HM_H}`} className="w-full rounded-md border border-slate-800 bg-slate-950/60" role="img" aria-label={label}>
+      {FIELD_HOMES.map((h) => (
+        <g key={h.pos} opacity={0.5}>
+          <circle cx={fx(h.x)} cy={fy(h.y)} r={1.2} fill="none" stroke="#475569" strokeWidth={0.4} />
+          <text x={fx(h.x)} y={fy(h.y) - 2} fill="#64748b" fontSize={3} textAnchor="middle">{h.pos}</text>
+        </g>
+      ))}
+      {cells.map((c, i) => {
+        const n = c.outs + c.hits;
+        const outRate = n ? c.outs / n : 0;
+        const r = Math.round(220 * (1 - outRate) + 40 * outRate);
+        const g = Math.round(60 * (1 - outRate) + 200 * outRate);
+        return (
+          <rect
+            key={i}
+            x={fx(c.x) - HM_CELL / 2}
+            y={fy(c.y) - HM_CELL / 2}
+            width={HM_CELL}
+            height={HM_CELL}
+            rx={0.6}
+            fill={`rgb(${r},${g},70)`}
+            opacity={0.2 + 0.8 * (n / maxN)}
+          >
+            <title>{`${c.outs} out / ${c.hits} hit`}</title>
+          </rect>
+        );
+      })}
+    </svg>
+  );
+}
+
+function HeatMaps({ heatBins, sprayBins }: { heatBins: HeatBin[]; sprayBins: SprayBin[] }) {
+  const [pos, setPos] = useState<string>('all');
+  const present = useMemo(
+    () => FIELDING_POS_ORDER.filter((p) => heatBins.some((b) => b.pos === p)),
+    [heatBins],
+  );
+  const activePos = pos !== 'all' && !present.includes(pos as (typeof present)[number]) ? 'all' : pos;
+
+  // Fielding cells: filter to one position, or merge per-position cells at the
+  // same location for "all".
+  const fieldingCells = useMemo<Cell[]>(() => {
+    if (activePos !== 'all') return heatBins.filter((b) => b.pos === activePos);
+    const m = new Map<string, Cell>();
+    for (const b of heatBins) {
+      const k = `${b.x}|${b.y}`;
+      const e = m.get(k) ?? { x: b.x, y: b.y, outs: 0, hits: 0 };
+      e.outs += b.outs; e.hits += b.hits;
+      m.set(k, e);
+    }
+    return [...m.values()];
+  }, [heatBins, activePos]);
+
+  if (heatBins.length === 0 && sprayBins.length === 0) {
+    return <p className="text-sm text-slate-400">No ball-location data yet — run <span className="text-emerald-300">Clear &amp; re-sync</span> to backfill engagement + spray coordinates into stored games.</p>;
+  }
+
+  const tally = (cells: Cell[]) => cells.reduce((a, c) => ({ o: a.o + c.outs, h: a.h + c.hits }), { o: 0, h: 0 });
+  const spray = tally(sprayBins);
+  const field = tally(fieldingCells);
+
+  return (
+    <div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        {/* Where balls were HIT against us (true spray) */}
+        <div>
+          <div className="mb-1 flex items-baseline justify-between gap-2 text-xs">
+            <h4 className="font-semibold text-slate-300">Where balls were hit (vs us)</h4>
+            <span className="text-slate-500">{spray.o + spray.h} · {spray.o} out / {spray.h} hit</span>
+          </div>
+          {sprayBins.length > 0
+            ? <FieldHeat cells={sprayBins} label="Opponent batted-ball spray" />
+            : <p className="text-[11px] text-slate-500">No spray yet — re-sync to backfill.</p>}
+        </div>
+
+        {/* Where WE fielded them */}
+        <div>
+          <div className="mb-1 flex items-center justify-between gap-2 text-xs">
+            <h4 className="font-semibold text-slate-300">Where we fielded them</h4>
+            <select
+              value={activePos}
+              onChange={(e) => setPos(e.target.value)}
+              className="rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-slate-300"
+            >
+              <option value="all">All positions</option>
+              {present.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </div>
+          {heatBins.length > 0
+            ? <FieldHeat cells={fieldingCells} label="Fielded-ball heat map" />
+            : <p className="text-[11px] text-slate-500">No engagement data yet — re-sync to backfill.</p>}
+          <p className="mt-0.5 text-right text-[10px] text-slate-500">{field.o + field.h} fielded · {field.o} out / {field.h} hit</p>
+        </div>
+      </div>
+
+      <p className="mt-2 text-[10px] text-slate-600">
+        Color = out-rate (<span className="text-emerald-400">green</span> = we got the out, <span className="text-red-400">red</span> = hit);
+        brightness = volume. Home plate bottom-center, outfield up top. <strong>Left</strong> is a true spray (where the ball was hit, from
+        contact angle+depth — includes balls that got through, so red clusters reveal gaps). <strong>Right</strong> is where our fielders
+        actually engaged them; a ball that gets through is logged wherever the next fielder picked it up, so its gaps don’t mean “no ball went there.”
+      </p>
+    </div>
+  );
+}
+
 export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
   const [players, setPlayers] = useState<AggregatedPlayer[]>([]);
   const [posImp, setPosImp] = useState<PositionImportance[]>([]);
   const [derivedStatWeights, setDerivedStatWeights] = useState<StatWeights>({});
+  const [heatBins, setHeatBins] = useState<HeatBin[]>([]);
+  const [sprayBins, setSprayBins] = useState<SprayBin[]>([]);
   const [applyState, setApplyState] = useState<'idle' | 'applying' | 'done'>('idle');
   const [totalGames, setTotalGames] = useState(0);
   const [hasDb, setHasDb] = useState(true);
@@ -287,6 +550,8 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
       setPlayers(json.players ?? []);
       setPosImp(json.positionImportance ?? []);
       setDerivedStatWeights(json.statWeights ?? {});
+      setHeatBins(json.heatBins ?? []);
+      setSprayBins(json.sprayBins ?? []);
       setTotalGames(json.totalGames ?? 0);
     } catch {
       setError('Failed to load metrics');
@@ -475,7 +740,7 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
           {/* Controls */}
           <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
             <div className="flex rounded border border-slate-700">
-              {(['fielding', 'batting', 'positions'] as const).map((v) => (
+              {(['fielding', 'batting', 'positions', 'alignment', 'heatmap'] as const).map((v) => (
                 <button
                   key={v}
                   type="button"
@@ -606,9 +871,9 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
               <p className="mt-1.5 text-[10px] text-slate-600">
                 SPD weight ← how far fielders actually range to make plays; ARM ← how much throwing matters (throw-rate × throw speed —
                 throws, not assists, so outfielder arms aren’t zeroed); FLD is a constant catch/exchange baseline (the log can’t isolate
-                receiving/scooping skill, so it dominates at low-range spots like 1B/C). Each row is normalized to sum to 1.0; magnitude
-                anchored to the defaults’ averages, profile set by the data. ARM is blended halfway to the hand-tuned prior, since arm’s
-                deterrence value (holding runners) never appears in the log — without it corner-OF arms (esp. RF) read too low.
+                receiving/scooping skill). Each row sums to 1.0. The data profile is then blended <em>toward the hand-tuned prior</em>
+                (prior-dominant), because the signals that matter most — DP/relay value (infield arm) and runner deterrence (outfield arm) —
+                never appear in the log; the prior encodes them (arm-led infields, speed-led outfields) and the data nudges the magnitudes.
               </p>
             </div>
           )}
@@ -621,6 +886,10 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
             </p>
           ) : view === 'positions' ? (
             <PositionComparison players={players} />
+          ) : view === 'alignment' ? (
+            <BestAlignment players={players} posImp={posImp} />
+          ) : view === 'heatmap' ? (
+            <HeatMaps heatBins={heatBins} sprayBins={sprayBins} />
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-xs">
