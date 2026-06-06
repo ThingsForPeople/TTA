@@ -98,6 +98,10 @@ export interface FieldingLine {
   pae: number; // plays above expected, this game
   stealAttempts: number;
   caughtStealing: number;
+  dp: number; // double plays involved in (any role)
+  dpStarted: number;
+  dpTurned: number;
+  dpFinished: number;
 }
 
 export interface ReplayEvaluation {
@@ -132,6 +136,10 @@ export function fieldingLinesFromMetrics(metrics: GameMetrics): FieldingLine[] {
       pae: Math.round((p.engagedOuts - p.expectedOuts) * 10) / 10,
       stealAttempts: p.stealAttempts,
       caughtStealing: p.caughtStealing,
+      dp: p.dpInvolved ?? 0,
+      dpStarted: p.dpStarted ?? 0,
+      dpTurned: p.dpTurned ?? 0,
+      dpFinished: p.dpFinished ?? 0,
     }))
     .sort((a, b) => b.plays - a.plays || b.chances - a.chances);
 }
@@ -537,6 +545,16 @@ export interface PlayerGameMetrics {
   // catcher steal defense (opponent steal attempts faced + how many were caught)
   stealAttempts: number;
   caughtStealing: number;
+  // Double-play participation (descriptive). `dpInvolved` = distinct DPs this
+  // fielder took part in (any role); the three role tallies break that down and
+  // are NOT mutually exclusive (a 3-6-3 starter is also the finisher), so they
+  // can sum to more than dpInvolved. These are tags layered on the putouts/
+  // assists already counted — not new outs. Detected from the `double_play`
+  // outcome label + the ordered fielding chain.
+  dpInvolved: number;
+  dpStarted: number; // fielded the ball that began the DP (the feed)
+  dpTurned: number; // recorded an out then relayed onward (the pivot)
+  dpFinished: number; // recorded the final out of the DP
   // Raw per-engaged-chance records: distance covered (`d`) + whether it was an
   // out (`o`), plus the integer field coordinates of the engagement (`x`,`y`,
   // quantized — origin = home plate, +x = RF side, −y = deeper). `d`/`o` let the
@@ -642,6 +660,7 @@ export interface PlayerPositionSplit {
   closePlays: number;
   stealAttempts: number;
   caughtStealing: number;
+  dp: number; // double plays involved in at this position
 }
 
 // Per-player aggregate across multiple games (derived rates), returned by the
@@ -665,6 +684,8 @@ export interface AggregatedPlayer {
   pae: number; expectedOuts: number;
   // catcher steal defense
   stealAttempts: number; caughtStealing: number; csRate: number | null;
+  // double-play participation (descriptive), summed across games
+  dp: number; dpStarted: number; dpTurned: number; dpFinished: number;
   // per-position fielding splits (best-position breakdown), most-played first
   byPosition: PlayerPositionSplit[];
 }
@@ -696,6 +717,7 @@ function emptyMetrics(playerId: string, name: string, position: number | null): 
     rangeSum: 0, rangeCount: 0,
     throwSpeedSum: 0, throwSpeedCount: 0, throwSpeedMax: 0, releaseSum: 0, releaseCount: 0,
     expectedOuts: 0, engagedOuts: 0, leverageSum: 0, stealAttempts: 0, caughtStealing: 0,
+    dpInvolved: 0, dpStarted: 0, dpTurned: 0, dpFinished: 0,
     engageDists: [],
   };
 }
@@ -982,6 +1004,46 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
           }
           break;
         }
+      }
+    }
+
+    // Double-play participation: if this play was labeled a DP, credit our
+    // fielders by role from the ordered fielding chain. Roles aren't exclusive
+    // (a 3-6-3 starter is also the finisher). Descriptive tags only — the outs
+    // themselves are already counted as putouts/assists above.
+    const evs = seg.events ?? [];
+    const isDP = evs.some((e: { type?: string; payload?: { result?: string } }) =>
+      e.type === 'batter.result' && e.payload?.result === 'double_play');
+    if (isDP) {
+      let starter: string | undefined; // first fielder to field the ball
+      const outs: { fid: string; i: number }[] = [];
+      const throwsBy = new Map<string, number[]>(); // fielderId → throw event indices
+      evs.forEach((e: { type?: string; payload?: Record<string, unknown> }, i: number) => {
+        const p = e.payload ?? {};
+        if (e.type === 'fielder.catch' && !starter && (p.catchType === 'ground' || p.catchType === 'fly')) {
+          starter = p.fielderId as string;
+        } else if (e.type === 'fielder.throw' && p.throwerId) {
+          const arr = throwsBy.get(p.throwerId as string) ?? [];
+          arr.push(i);
+          throwsBy.set(p.throwerId as string, arr);
+        } else if (e.type === 'runner.out' && p.fielderId) {
+          outs.push({ fid: p.fielderId as string, i });
+        }
+      });
+      if (outs.length >= 2) {
+        const involved = new Set<string>();
+        const credit = (fid: string | undefined, role: 'dpStarted' | 'dpTurned' | 'dpFinished') => {
+          if (!fid || !isOurs(fid)) return;
+          row(fid)[role]++;
+          involved.add(fid);
+        };
+        credit(starter, 'dpStarted');
+        credit(outs[outs.length - 1].fid, 'dpFinished');
+        // Pivot: recorded an out, then threw onward (a throw after that out).
+        for (const o of outs) {
+          if ((throwsBy.get(o.fid) ?? []).some((ti) => ti > o.i)) credit(o.fid, 'dpTurned');
+        }
+        for (const fid of involved) row(fid).dpInvolved++;
       }
     }
   }

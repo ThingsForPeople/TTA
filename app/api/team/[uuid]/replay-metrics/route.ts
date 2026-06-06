@@ -253,6 +253,7 @@ function buildSplits(byPos: Map<number, { games: number; sum: Sums }>): PlayerPo
       closePlays: s.closePlays,
       stealAttempts: s.stealAttempts,
       caughtStealing: s.caughtStealing,
+      dp: s.dpInvolved,
     });
   }
   // Most-played first (tie-break by chances), so [0] is the primary position.
@@ -406,6 +407,7 @@ function aggregate(rows: { playerId: string; playerName: string; position: numbe
       stealAttempts: s.stealAttempts,
       caughtStealing: s.caughtStealing,
       csRate: s.stealAttempts > 0 ? Math.round((s.caughtStealing / s.stealAttempts) * 1000) / 1000 : null,
+      dp: s.dpInvolved, dpStarted: s.dpStarted, dpTurned: s.dpTurned, dpFinished: s.dpFinished,
       byPosition,
     });
   }
@@ -420,6 +422,7 @@ const NUMERIC_KEYS: (keyof PlayerGameMetrics)[] = [
   'putouts', 'assists', 'fieldErrors', 'chances', 'closePlays',
   'rangeSum', 'rangeCount', 'throwSpeedSum', 'throwSpeedCount', 'releaseSum', 'releaseCount',
   'expectedOuts', 'engagedOuts', 'leverageSum', 'stealAttempts', 'caughtStealing',
+  'dpInvolved', 'dpStarted', 'dpTurned', 'dpFinished',
 ];
 
 // GET — aggregated advanced stats across stored replay metrics.

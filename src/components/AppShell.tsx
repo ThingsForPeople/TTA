@@ -209,10 +209,13 @@ export function AppShell({
 
         {/* Mounted lazily so its games fetch only fires when opened. Keyed on
             uuid so switching the viewed team fully resets its internal state
-            (selected opponent, filters) rather than keeping the old team's. */}
+            (selected opponent, filters) rather than keeping the old team's.
+            Seeded with the already-scraped recentGames so the dropdown + record
+            render with zero upstream calls (the games-list endpoint 429s hard);
+            deeper history is an opt-in Refresh inside the tab. */}
         {tab === 'matchups' && (
           <div className="space-y-4">
-            <Matchups key={uuid} teamUuid={uuid} />
+            <Matchups key={uuid} teamUuid={uuid} seedGames={team.recentGames} />
           </div>
         )}
 

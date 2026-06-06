@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { RecentGame } from '../lib/types';
 import type { ReplayEvaluation } from '../lib/parseReplay';
 import { buildGamesContext } from '../lib/gameSummary';
 import { GameAiAnalysis } from './GameAiAnalysis';
@@ -62,48 +63,63 @@ function windowBounds(filter: TimeFilter, now: Date): { start?: number; end?: nu
   return { start: midnight - 86_400_000, end: midnight }; // yesterday
 }
 
-export function Matchups({ teamUuid }: { teamUuid: string }) {
-  const [games, setGames] = useState<GameRow[]>([]);
-  const [loading, setLoading] = useState(true);
+// The scraped team already carries a recent-games window with every field the
+// dropdown/record needs — map it to a GameRow so we can render from it with zero
+// upstream calls. (recentGames has no game_mode; that column just shows '—'.)
+function seedToRows(seed: RecentGame[]): GameRow[] {
+  return seed.map((g) => ({
+    gameId: g.gameId,
+    completedAt: g.completedAt ?? null,
+    gameMode: null,
+    opponentTeamId: g.opponentTeamId ?? null,
+    opponentName: g.opponentName ?? null,
+    ourScore: g.ourScore ?? null,
+    opponentScore: g.opponentScore ?? null,
+    won: g.won ?? null,
+    wasHome: g.wasHome ?? null,
+  }));
+}
+
+export function Matchups({ teamUuid, seedGames = [] }: { teamUuid: string; seedGames?: RecentGame[] }) {
+  // Seed from the already-scraped recentGames so the tab renders instantly with
+  // no request — the games-list endpoint 429s hard, so we no longer fetch it on
+  // mount. The Refresh button pulls a deeper (capped) window on demand.
+  const [games, setGames] = useState<GameRow[]>(() => seedToRows(seedGames));
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The opponent is chosen via the team search (any team), so the name no longer
+  // has to come from our own game history — track both id and name.
   const [selectedOpp, setSelectedOpp] = useState<string>('');
+  const [selectedOppName, setSelectedOppName] = useState<string>('');
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('all');
-  const [countN, setCountN] = useState(0); // 0 = all
+  const [countN, setCountN] = useState(10); // 0 = all; default to the last 10 meetings
   const [activeGameId, setActiveGameId] = useState<string | null>(null);
 
-  // Fetch the games list. `force` bypasses the session cache (and asks the
-  // route to skip its caches) so the Refresh button can pull newly-played games.
-  const loadGames = useCallback(
-    async (force = false) => {
-      if (!force) {
-        const cached = gamesCache.get(teamUuid);
-        if (cached && Date.now() - cached.ts < GAMES_TTL_MS) {
-          setGames(cached.games);
-          setLoading(false);
-          return;
-        }
-      }
-      if (force) setRefreshing(true); else setLoading(true);
-      setError(null);
-      try {
-        const res = await fetch(`/api/team/${teamUuid}/games${force ? '?fresh=1' : ''}`, force ? { cache: 'no-store' } : undefined);
-        const json = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
-        const rows = (json.games ?? []) as GameRow[];
-        gamesCache.set(teamUuid, { games: rows, ts: Date.now() });
-        setGames(rows);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    },
-    [teamUuid],
-  );
+  // Refresh re-pulls a fresh games window to widen head-to-head coverage beyond
+  // the scrape seed. The only upstream call the tab makes on its own (the games
+  // endpoint 429s on bursts), so it's an explicit, non-destructive action.
+  const loadGames = useCallback(async () => {
+    setRefreshing(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/team/${teamUuid}/games?fresh=1`, { cache: 'no-store' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+      const rows = (json.games ?? []) as GameRow[];
+      gamesCache.set(teamUuid, { games: rows, ts: Date.now() });
+      setGames(rows);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRefreshing(false);
+    }
+  }, [teamUuid]);
 
-  useEffect(() => { loadGames(); }, [loadGames]);
+  // On open, reuse a deeper list already pulled this session (no network).
+  useEffect(() => {
+    const cached = gamesCache.get(teamUuid);
+    if (cached && Date.now() - cached.ts < GAMES_TTL_MS) setGames(cached.games);
+  }, [teamUuid]);
 
   // Opponents faced, most-recently-played first.
   const opponents = useMemo(() => {
@@ -120,12 +136,22 @@ export function Matchups({ teamUuid }: { teamUuid: string }) {
     return [...m.entries()].map(([id, v]) => ({ id, ...v })).sort((a, b) => b.last - a.last);
   }, [games]);
 
-  // Default to the most-recently-played opponent once games load.
+  // Default to the most-recently-played opponent (from the scrape) so the tab
+  // isn't empty on open; the search lets you switch to any other team.
   useEffect(() => {
-    if (!selectedOpp && opponents.length) setSelectedOpp(opponents[0].id);
+    if (!selectedOpp && opponents.length) {
+      setSelectedOpp(opponents[0].id);
+      setSelectedOppName(opponents[0].name);
+    }
   }, [opponents, selectedOpp]);
 
-  const oppName = opponents.find((o) => o.id === selectedOpp)?.name ?? '';
+  const pickOpponent = useCallback((t: { id: string; name: string }) => {
+    setSelectedOpp(t.id);
+    setSelectedOppName(t.name);
+  }, []);
+
+  // Prefer the explicitly-picked name; fall back to whatever our games show.
+  const oppName = selectedOppName || opponents.find((o) => o.id === selectedOpp)?.name || '';
 
   const filtered = useMemo(() => {
     if (!selectedOpp) return [];
@@ -169,12 +195,12 @@ export function Matchups({ teamUuid }: { teamUuid: string }) {
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300">Matchups</h2>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] text-slate-500">{games.length} games loaded</span>
+          <span className="text-[10px] text-slate-500">{games.length} games</span>
           <button
             type="button"
-            onClick={() => loadGames(true)}
-            disabled={loading || refreshing}
-            title="Fetch newly-played games"
+            onClick={() => loadGames()}
+            disabled={refreshing}
+            title="Pull a fresh games window from the server to widen head-to-head coverage"
             className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-300 transition-colors hover:border-emerald-500 hover:text-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {refreshing ? 'Refreshing…' : 'Refresh'}
@@ -182,58 +208,58 @@ export function Matchups({ teamUuid }: { teamUuid: string }) {
         </div>
       </div>
       <p className="mb-3 text-xs text-slate-500">
-        Analyze your record and games against a specific opponent. Filter by time window and game count.
+        Search for any team to see your head-to-head record and games against them.
       </p>
 
-      {loading ? (
-        <p className="text-sm text-slate-400">Loading games…</p>
-      ) : error ? (
-        <p className="text-sm text-red-300">Couldn’t load games: {error}</p>
-      ) : opponents.length === 0 ? (
-        <p className="text-sm text-slate-400">No games found for this team.</p>
+      {/* A Refresh failure (often a 429) is non-destructive: surface it inline
+          but keep the current view rather than blanking the tab. */}
+      {error && (
+        <p className="mb-3 text-xs text-amber-300/90">Couldn’t refresh games: {error}. Showing what we have.</p>
+      )}
+
+      {/* Controls: opponent search + filters */}
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+        <OpponentSearch selectedName={oppName} onPick={pickOpponent} />
+        <div className="flex rounded border border-slate-700">
+          {TIME_FILTERS.map((tf) => (
+            <button
+              key={tf.value}
+              type="button"
+              onClick={() => setTimeFilter(tf.value)}
+              className={'px-2 py-1 transition-colors ' + (timeFilter === tf.value ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-200')}
+            >
+              {tf.label}
+            </button>
+          ))}
+        </div>
+        <label className="flex items-center gap-1 text-slate-400">
+          Last
+          <input
+            type="number"
+            min={1}
+            value={countN || ''}
+            placeholder="all"
+            onChange={(e) => setCountN(Math.max(0, Number(e.target.value) || 0))}
+            className="w-16 rounded border border-slate-700 bg-slate-950 px-1.5 py-1 text-slate-300"
+          />
+          games
+        </label>
+      </div>
+
+      {selectedOpp && (
+        <div className="mb-2 text-sm text-slate-300">
+          Head-to-head vs <span className="font-semibold text-emerald-300">{oppName}</span>
+        </div>
+      )}
+
+      {!selectedOpp ? (
+        <p className="text-sm text-slate-400">Search for an opponent above to see your head-to-head.</p>
+      ) : filtered.length === 0 ? (
+        <p className="text-sm text-slate-400">
+          No games vs {oppName} in this window. You may not have faced them recently — try “Refresh” to pull a wider window.
+        </p>
       ) : (
         <>
-          {/* Controls */}
-          <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
-            <select
-              value={selectedOpp}
-              onChange={(e) => setSelectedOpp(e.target.value)}
-              className="rounded border border-slate-700 bg-slate-950 px-2 py-1 text-slate-200 focus:border-emerald-500 focus:outline-none"
-            >
-              {opponents.map((o) => (
-                <option key={o.id} value={o.id}>{o.name} ({o.count})</option>
-              ))}
-            </select>
-            <div className="flex rounded border border-slate-700">
-              {TIME_FILTERS.map((tf) => (
-                <button
-                  key={tf.value}
-                  type="button"
-                  onClick={() => setTimeFilter(tf.value)}
-                  className={'px-2 py-1 transition-colors ' + (timeFilter === tf.value ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-200')}
-                >
-                  {tf.label}
-                </button>
-              ))}
-            </div>
-            <label className="flex items-center gap-1 text-slate-400">
-              Last
-              <input
-                type="number"
-                min={1}
-                value={countN || ''}
-                placeholder="all"
-                onChange={(e) => setCountN(Math.max(0, Number(e.target.value) || 0))}
-                className="w-16 rounded border border-slate-700 bg-slate-950 px-1.5 py-1 text-slate-300"
-              />
-              games
-            </label>
-          </div>
-
-          {filtered.length === 0 ? (
-            <p className="text-sm text-slate-400">No games vs {oppName} in this window.</p>
-          ) : (
-            <>
               {/* Aggregate */}
               <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <Stat label="Record" value={`${agg.w}-${agg.l}${agg.t ? `-${agg.t}` : ''}`} sub={agg.winPct != null ? `${Math.round(agg.winPct * 100)}% win` : undefined} />
@@ -287,8 +313,6 @@ export function Matchups({ teamUuid }: { teamUuid: string }) {
               />
             </>
           )}
-        </>
-      )}
 
       {activeGameId && (
         <BoxScoreModal teamUuid={teamUuid} gameId={activeGameId} onClose={() => setActiveGameId(null)} />
@@ -303,6 +327,95 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
       <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
       <div className="font-mono text-sm text-slate-100">{value}</div>
       {sub && <div className="text-[10px] text-slate-500">{sub}</div>}
+    </div>
+  );
+}
+
+interface TeamSearchRow {
+  teamId: string;
+  teamName: string;
+  managerName: string | null;
+  wins: number | null;
+  losses: number | null;
+  teamLevel: number | null;
+}
+
+// Debounced team-name search over tiny-teams (via our /api/team-search proxy) so
+// the opponent can be any team, not just ones in our game history. One cheap
+// upstream call per (debounced) query; results pick the opponent by id + name.
+function OpponentSearch({
+  selectedName,
+  onPick,
+}: {
+  selectedName: string;
+  onPick: (t: { id: string; name: string }) => void;
+}) {
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState<TeamSearchRow[]>([]);
+  const [open, setOpen] = useState(false);
+  const [searching, setSearching] = useState(false);
+
+  useEffect(() => {
+    const query = q.trim();
+    if (query.length < 2) { setResults([]); setSearching(false); return; }
+    let cancelled = false;
+    setSearching(true);
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/team-search?query=${encodeURIComponent(query)}`);
+        const json = await res.json().catch(() => ({}));
+        if (!cancelled) setResults((json.results ?? []) as TeamSearchRow[]);
+      } catch {
+        if (!cancelled) setResults([]);
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, 300);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [q]);
+
+  const showMenu = open && q.trim().length >= 2;
+
+  return (
+    <div className="relative">
+      <input
+        value={q}
+        onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        placeholder={selectedName ? `vs ${selectedName} — search to change…` : 'Search opponent team…'}
+        className="w-60 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-slate-200 placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none"
+      />
+      {showMenu && (
+        <div className="absolute z-20 mt-1 max-h-64 w-72 overflow-auto rounded border border-slate-700 bg-slate-950 shadow-lg">
+          {searching && results.length === 0 ? (
+            <div className="px-2 py-1.5 text-slate-500">Searching…</div>
+          ) : results.length === 0 ? (
+            <div className="px-2 py-1.5 text-slate-500">No teams found</div>
+          ) : (
+            results.map((t) => (
+              <button
+                key={t.teamId}
+                type="button"
+                // onMouseDown + preventDefault so the pick lands before the input's
+                // blur can tear the menu down (the classic combobox click-vs-blur race).
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  onPick({ id: t.teamId, name: t.teamName });
+                  setQ(t.teamName); // show the picked team in the box, not an empty field
+                  setOpen(false);
+                }}
+                className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left hover:bg-slate-800"
+              >
+                <span className="min-w-0 truncate text-slate-200">{t.teamName}</span>
+                <span className="shrink-0 text-[10px] text-slate-500">
+                  {t.wins != null && t.losses != null ? `${t.wins}-${t.losses}` : ''}
+                  {t.teamLevel != null ? ` · L${t.teamLevel}` : ''}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }

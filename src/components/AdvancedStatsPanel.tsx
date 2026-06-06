@@ -312,6 +312,7 @@ const FIELDING_COLS: Column[] = [
   { key: 'armMax', label: 'Arm↑', title: 'Max throw speed', get: (p) => p.armMax, fmt: num1 },
   { key: 'releaseAvg', label: 'Rel', title: 'Avg release time (lower = quicker)', get: (p) => p.releaseAvg, fmt: (v) => (v == null ? '·' : v.toFixed(2)) },
   { key: 'closePlays', label: 'Tough', title: 'Difficult plays converted', get: (p) => p.closePlays, fmt: int },
+  { key: 'dp', label: 'DP', title: 'Double plays turned (any role: started / pivoted / finished), summed across games', get: (p) => p.dp, fmt: int },
   { key: 'caughtStealing', label: 'CS', title: 'Runners caught stealing (catcher) — attempts & rate shown in insights', get: (p) => p.caughtStealing, fmt: int },
 ];
 
