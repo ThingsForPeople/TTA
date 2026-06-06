@@ -309,6 +309,22 @@ const SLOT_ROLES: Record<number, BattingSlotRole> = {
   6: 'lower', 7: 'lower', 8: 'lower', 9: 'lower',
 };
 
+// Per-slot run leverage — how much a slot's hitter quality matters to scoring,
+// used to WEIGHT the assignment objective. Without it the objective was an
+// unweighted sum of per-slot fit, so it was literally indifferent to whether
+// your best bat hit 3rd or 7th (both pure-wOBA slots scored identically), and
+// nothing encoded the top-of-order plate-appearance premium. These are MLB
+// plate-appearances-per-game by lineup slot (≈4.65 leadoff → 3.81 ninth),
+// normalized to mean 1.0 — the dominant, least-disputable driver of slot value.
+// The finer "men-on" context (#4 RBI leverage, #2 over #3) is approximated by
+// the existing per-slot stat tilts in slotFit (ISO at #4, OBP at #2) rather than
+// fabricated run-expectancy coefficients. Maximizing Σ leverage·fit then pulls
+// better hitters up the order (rearrangement inequality) and breaks the tie.
+const SLOT_LEVERAGE: Record<number, number> = {
+  1: 1.099, 2: 1.075, 3: 1.049, 4: 1.026, 5: 1.000,
+  6: 0.976, 7: 0.950, 8: 0.926, 9: 0.900,
+};
+
 const SLOT_REASON: Record<number, string> = {
   1: 'Leadoff — OBP-driven, low K%',
   2: '#2 — wOBA + OBP tilt',
@@ -328,8 +344,10 @@ const SLOT_LOCKED_TALENTS: Record<string, number> = {
   'The Janitor': 4,
 };
 
-// Fill priority for the greedy seed (refined afterward by 2-opt).
-const SLOT_SEED_PRIORITY = [3, 1, 2, 4, 5, 8, 6, 7, 9];
+// Fill priority for the greedy seed (refined afterward by 2-opt). Highest-
+// leverage slots claim their best-fit hitter first, matching the weighted
+// objective so 2-opt starts near the optimum.
+const SLOT_SEED_PRIORITY = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
 function slotFit(p: Player, slot: number, ms: PlayerMetaStore, mult = 1): number {
   const role = SLOT_ROLES[slot];
@@ -411,10 +429,12 @@ function buildBattingOrder(
     if (pick) { assign.set(slot, pick); used.add(pick); }
   }
 
-  // 3b. Objective = total slot fit (talent value is already inside slotFit).
+  // 3b. Objective = total LEVERAGE-WEIGHTED slot fit. The per-slot weight makes
+  //     the assignment prefer better hitters in higher-PA slots (and breaks the
+  //     old indifference among pure-wOBA slots). Talent value is inside slotFit.
   const objective = (a: Map<number, Player>): number => {
     let s = 0;
-    for (const [slot, p] of a) s += slotFit(p, slot, ms, mult);
+    for (const [slot, p] of a) s += SLOT_LEVERAGE[slot] * slotFit(p, slot, ms, mult);
     return s;
   };
 
