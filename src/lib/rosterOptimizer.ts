@@ -78,18 +78,32 @@ const PITCHER_CATCHER_TALENTS = [
   'Signal Sync',
 ];
 
-// Position importance: how costly a defensive mistake is at each spot.
-// Applied during optimization only (not displayed scores) so the search
-// penalizes putting weak defenders at high-impact positions.
+// Position importance: how costly a defensive mistake is at each spot — i.e.
+// how much fielder skill swings outs there. Applied during optimization only
+// (not displayed scores) so the search penalizes putting weak defenders at
+// high-leverage positions. This is the cold-start PRIOR; syncing replays and
+// hitting "Use derived weights" replaces it with the team's data-derived
+// impRecommended (0.6·leverage + 0.4·workload) from the Advanced Stats panel.
+//
+// Re-ranked to the replay leverage finding for THIS sim (≈50 games): OUTFIELD
+// carries the most leverage — fly balls land in the in-doubt 6–12u range band
+// where a good glove vs a bad one swings the out — while infield grounders
+// convert ~95–100% regardless of range, so IF leverage is low and lives only
+// in the long tail. Hence CF/LF/RF > SS≈2B/3B > 1B, the OPPOSITE of the
+// traditional MLB SS-premium hierarchy this used to encode. Catcher's only
+// leverage is caught-stealing, so it's floored near average; 1B is the
+// receiver/bat-dump spot (scoops throws, makes few range plays) → lowest.
+// Normalized to mean 1.0; magnitudes kept moderate (the 0.4 workload term in
+// the real blend tempers the spread, and this is just a prior).
 export const DEFAULT_POSITION_IMPORTANCE: Record<string, number> = {
-  SS:  1.20,
-  CF:  1.15,
-  '2B': 1.05,
-  '3B': 1.05,
-  RF:  1.00,
-  LF:  0.95,
-  C:   0.95,
-  '1B': 0.70, // lowest by a clear margin — the bat-dump spot; workload over-credits it
+  CF:  1.22, // deepest range, most in-doubt fly balls → highest leverage
+  LF:  1.10,
+  RF:  1.10, // corner OF; arm slightly more valuable but leverage ≈ LF
+  SS:  1.02, // most-leveraged IF spot (throw from the hole + DP), but well below OF
+  '2B': 0.98,
+  '3B': 0.95, // hot corner, but high conversion → lowest-leverage dirt spot
+  C:   0.93, // floored near average — its leverage is steal defense, not batted balls
+  '1B': 0.70, // lowest by a clear margin — receiver/bat-dump; workload over-credits it
 };
 
 // ── Fielding talent bonus system ─────────────────────────────────────
