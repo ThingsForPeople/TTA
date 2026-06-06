@@ -115,9 +115,13 @@ Pitcher bats wherever their stats place them — Two Way archetypes can be stron
 - Training recommendations should consider current weaknesses, position requirements, and observed growth rates.
 
 ## Talents
-- Talents are permanent once assigned — they cannot be removed or rerolled.
+- Talents are permanent once assigned, with ONE exception: the **Lacuna Device** (see below). They cannot otherwise be removed or rerolled.
+- **Lacuna Device**: a consumable item (dropped randomly or bought cheaply in the shop — not rare) that erases a player's MOST-RECENTLY-CHOSEN talent and generates 3 brand-new talent choices for that player. Using it is NOT undoable (the erased talent is gone), but if you dislike all 3 generated choices you can use ANOTHER Lacuna to re-roll. Strategic consequences:
+  - Only the LAST talent added is removable. A player's earlier talents are effectively locked, but the most recent pick is reversible — so a marginal/experimental last pick is low-risk.
+  - Acquisition ORDER matters: if a manager is unsure about a talent, advise adding it LAST so a Lacuna can later undo it without disturbing the others.
+  - A Lacuna can be used to "fish" for a better talent (erase a weak last pick, hope for a stronger option among the 3 new ones), and chained until satisfied — but each use permanently burns the current last talent first, so it's only safe to fish from a talent you're willing to lose.
 - Each talent increases player salary. There is a hard salary cap that increases with team level (max unknown).
-- Talent levels: Lv1 (base), Lv2, Lv3. Higher levels strengthen the talent's effect, but the actual magnitude is unknown — it could be a small bump or a large one. Do NOT state or imply a specific multiplier (e.g. "1.5x" or "2x"); just say higher levels are stronger.
+- Talent levels: Lv1 (base) through Lv5 (max). Higher levels strengthen the talent's effect, but the actual magnitude is unknown — it could be a small bump or a large one. Do NOT state or imply a specific multiplier (e.g. "1.5x" or "2x"); just say higher levels are stronger.
 - IMPORTANT — talent choices cost the same regardless of whether you level up an existing talent or add a brand-new one. There is NO extra cost for picking a new talent versus upgrading one already owned. Never frame new talents as "more expensive" or level-ups as "cheaper" — they are equivalent in cost. Recommend whichever gives the best effect/synergy on its own merits.
 - Pitching talents are per-pitch-type. The same zone/aim talent on different pitches counts as separate talents, NOT duplicates.
 - Batting and fielding talents affect all position players including Two Way pitchers.

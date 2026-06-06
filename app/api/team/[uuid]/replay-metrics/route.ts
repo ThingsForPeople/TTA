@@ -15,10 +15,13 @@ const FIELD_POS_STR = ['C', '1B', '2B', 'SS', '3B', 'LF', 'CF', 'RF'];
 // fielder could have reached); blending with xOuts (workload) damps both.
 const LEVERAGE_BLEND = 0.6;
 
-// How much the derived per-position ARM weight trusts the data vs the hand-tuned
-// prior. Arm's deterrence value (holding runners) never appears in the event
-// log, so we keep half the prior to avoid systematically under-reading it (RF).
-const ARM_DATA_WEIGHT = 0.5;
+// How much the derived per-position weights trust the replay data vs the
+// hand-tuned prior (DEFAULT_STAT_WEIGHTS), applied to ALL THREE stats. The log
+// can't see the signals that matter most — DP/relay value (infield arm) and
+// runner deterrence (outfield arm) — so the prior, which encodes them, stays
+// dominant; the data nudges the profile toward a team's actual range/arm
+// tendencies. The prior keeps arm-led infields and speed-led outfields intact.
+const DATA_WEIGHT = 0.35;
 
 // Position importance derived from real fielding workload: how much defensive
 // action (and how much skill-sensitive action) flows through each spot.
@@ -60,10 +63,15 @@ function buildPositionImportance(rows: { position: number | null; metrics: Playe
 
   return present
     .map((p, i) => {
-      // Floor the catcher to its default AFTER normalizing — its only leverage
-      // signal is caught-stealing, which structurally under-counts real C value.
+      // Floor/cap two structurally-misread spots AFTER normalizing.
+      //  • Catcher floored UP: its only leverage signal is caught-stealing, which
+      //    under-counts real C value.
+      //  • 1B capped DOWN: workload over-credits it (routine grounders, and it's
+      //    the end-point of many putouts), so the data props it above where it
+      //    belongs (it's the lowest-leverage spot — the bat-dump position).
       let rec = r2(blended[i] / mBlend);
       if (p === 'C') rec = Math.max(rec, DEFAULT_POSITION_IMPORTANCE['C'] ?? 0.95);
+      if (p === '1B') rec = Math.min(rec, DEFAULT_POSITION_IMPORTANCE['1B'] ?? 0.70);
       return {
         position: p,
         chances: acc[p].ch,
@@ -94,9 +102,11 @@ function buildPositionImportance(rows: { position: number | null; metrics: Playe
 //            baseline — which naturally dominates at low-range, low-throw spots
 //            (1B, C), matching intuition.
 //
-// The data sets the *profile* (which spot is range- vs arm-heavy); the overall
-// magnitude is anchored to the hand-tuned defaults' averages so derived weights
-// stay on the same scale. Each position's row is renormalized to sum to 1.0.
+// The data profile is then blended TOWARD the hand-tuned prior per stat
+// (prior-dominant: see DATA_WEIGHT) — the prior carries what the log can't see
+// (DP/relay value → infield arm; deterrence → outfield arm), so arm-led
+// infields and speed-led outfields survive while the data nudges the magnitudes
+// toward a team's real range/arm tendencies. Each row sums to 1.0.
 function buildStatWeights(rows: { position: number | null; metrics: PlayerGameMetrics }[]): StatWeights {
   const acc: Record<string, { rangeSum: number; rangeCount: number; throwSum: number; throwCount: number; chances: number }> = {};
   for (const r of rows) {
@@ -137,26 +147,79 @@ function buildStatWeights(rows: { position: number | null; metrics: PlayerGameMe
   const r2 = (v: number) => Math.round(v * 100) / 100;
   const out: StatWeights = {};
   for (const p of present) {
+    // Data PROFILE for this position (SPD from range, ARM from throw demand,
+    // FLD the flat catch/exchange baseline), normalized to sum 1.
     const spd = mSpd > 0 ? SPD_AVG * (spdRaw[p] / mSpd) : SPD_AVG;
     const arm = mArm > 0 ? ARM_AVG * (armRaw[p] / mArm) : 0;
     const fld = FLD_AVG;
     const sum = spd + arm + fld || 1;
-    const dFld = fld / sum, dArm = arm / sum, dSpd = spd / sum; // derived, sums to 1
+    const dFld = fld / sum, dArm = arm / sum, dSpd = spd / sum;
 
-    // Shrink the derived ARM toward the hand-tuned prior. Arm value is partly
-    // DETERRENCE (a strong corner-OF arm holds runners and prevents extra
-    // bases) which never appears in the event log, so the data systematically
-    // under-reads it — most visibly at RF. The prior encodes that; blending
-    // also tempers data overshoots (e.g. 2B/1B). FLD/SPD keep their data-driven
-    // ratio, splitting whatever arm leaves behind.
+    // Blend the data profile TOWARD the prior, per stat. The prior carries the
+    // signals the log can't see (DP/relay value → infield arm; runner
+    // deterrence → outfield arm), so it stays dominant (1 - DATA_WEIGHT) while
+    // the data nudges toward the team's real range/arm tendencies. Both inputs
+    // sum to 1, so the convex blend sums to 1 too — no renormalization needed.
     const prior = DEFAULT_STAT_WEIGHTS[p];
     if (!prior) { out[p] = { fld: r2(dFld), arm: r2(dArm), spd: r2(dSpd) }; continue; }
-    const armFinal = ARM_DATA_WEIGHT * dArm + (1 - ARM_DATA_WEIGHT) * (prior.arm ?? dArm);
-    const rest = Math.max(0, 1 - armFinal);
-    const fs = dFld + dSpd || 1;
-    out[p] = { fld: r2((rest * dFld) / fs), arm: r2(armFinal), spd: r2((rest * dSpd) / fs) };
+    const mix = (d: number, pr: number) => (1 - DATA_WEIGHT) * pr + DATA_WEIGHT * d;
+    out[p] = {
+      fld: r2(mix(dFld, prior.fld ?? dFld)),
+      arm: r2(mix(dArm, prior.arm ?? dArm)),
+      spd: r2(mix(dSpd, prior.spd ?? dSpd)),
+    };
   }
   return out;
+}
+
+// Fielded-ball heat map. Bins the per-chance engagement coords (x,y) into a
+// coarse grid PER POSITION and counts outs vs hits, so the client gets a small,
+// directly-renderable set instead of thousands of raw points. Binning here (not
+// at store time) means the resolution can change without a re-sync. Caveat: this
+// is where balls were FIELDED, not a true spray chart — a ball that gets through
+// is logged wherever the next fielder picked it up (see route notes / CLAUDE.md).
+export interface HeatBin { x: number; y: number; pos: string; outs: number; hits: number }
+const HEAT_BIN = 4; // field units per cell
+
+function buildHeatBins(rows: { position: number | null; metrics: PlayerGameMetrics }[]): HeatBin[] {
+  const map = new Map<string, HeatBin>();
+  for (const r of rows) {
+    const ed = r.metrics.engageDists;
+    if (!ed || r.position == null) continue;
+    const pos = POS_NUM_TO_STR[r.position];
+    if (!pos || pos === 'P') continue;
+    for (const e of ed) {
+      if (typeof e.x !== 'number' || typeof e.y !== 'number') continue;
+      const gx = Math.round(e.x / HEAT_BIN) * HEAT_BIN;
+      const gy = Math.round(e.y / HEAT_BIN) * HEAT_BIN;
+      const key = `${gx}|${gy}|${pos}`;
+      let b = map.get(key);
+      if (!b) { b = { x: gx, y: gy, pos, outs: 0, hits: 0 }; map.set(key, b); }
+      if (e.o) b.outs++; else b.hits++;
+    }
+  }
+  return [...map.values()];
+}
+
+// Opponent batted-ball SPRAY (where balls were HIT against us — a true spray
+// including balls that got through, derived from contact angle+depth). Stored
+// only on pitcher rows (`oppSpray`); binned the same way as the fielding map so
+// the two render side-by-side in the same coordinate space.
+export interface SprayBin { x: number; y: number; outs: number; hits: number }
+
+function buildSprayBins(rows: { metrics: PlayerGameMetrics }[]): SprayBin[] {
+  const map = new Map<string, SprayBin>();
+  for (const r of rows) {
+    for (const e of r.metrics.oppSpray ?? []) {
+      const gx = Math.round(e.x / HEAT_BIN) * HEAT_BIN;
+      const gy = Math.round(e.y / HEAT_BIN) * HEAT_BIN;
+      const key = `${gx}|${gy}`;
+      let b = map.get(key);
+      if (!b) { b = { x: gx, y: gy, outs: 0, hits: 0 }; map.set(key, b); }
+      if (e.o) b.outs++; else b.hits++;
+    }
+  }
+  return [...map.values()];
 }
 
 type Sums = Record<(typeof NUMERIC_KEYS)[number], number>;
@@ -190,6 +253,7 @@ function buildSplits(byPos: Map<number, { games: number; sum: Sums }>): PlayerPo
       closePlays: s.closePlays,
       stealAttempts: s.stealAttempts,
       caughtStealing: s.caughtStealing,
+      dp: s.dpInvolved,
     });
   }
   // Most-played first (tie-break by chances), so [0] is the primary position.
@@ -227,6 +291,66 @@ function applyDynamicCurve(rows: { position: number | null; metrics: PlayerGameM
       xo += p; lev += p * (1 - p); if (o) eo++;
     }
     r.metrics = { ...r.metrics, expectedOuts: xo, engagedOuts: eo, leverageSum: lev };
+  }
+}
+
+// Remove the shared per-GAME fielding-difficulty component from PAE so players
+// compare fairly ACROSS games. The out-curve conditions only on (position,
+// distance) — it can't see that some games were just harder to field (tough
+// opponent, bad pitching, a blowout). A backup whose innings cluster in those
+// games would read low for reasons of context, not skill. We estimate each
+// game's difficulty from the REST of the team that game (leave-one-out, so a
+// fielder can't set his own bar), credit/debit each row by it, then re-center
+// per position so the "0 = average fielder here" semantics (and the importance
+// derivation, which is left untouched) are preserved. Runs after the dynamic
+// curve, on the same visible set — query-time, no re-sync needed.
+const MIN_REST_CHANCES = 5;
+function applyGameContext(rows: { gameId: string; position: number | null; metrics: PlayerGameMetrics }[]) {
+  // Only rows the dynamic curve actually (re)computed participate; pre-backfill
+  // rows (no engageDists) keep their stored values.
+  const live = rows.filter((r) => r.metrics.engageDists && r.metrics.engageDists.length > 0);
+  if (live.length === 0) return;
+
+  // Per-game team totals across all our fielders.
+  const game = new Map<string, { outs: number; exp: number; ch: number }>();
+  for (const r of live) {
+    const g = game.get(r.gameId) ?? { outs: 0, exp: 0, ch: 0 };
+    g.outs += r.metrics.engagedOuts ?? 0;
+    g.exp += r.metrics.expectedOuts ?? 0;
+    g.ch += r.metrics.chances ?? 0;
+    game.set(r.gameId, g);
+  }
+
+  // Leave-one-out shift: δ = rest-of-team per-chance PAE that game.
+  // expectedOuts += δ·chances ⇒ PAE −= δ·chances, so a hard day (rest
+  // underperformed, δ<0) credits this fielder up; an easy day debits him.
+  for (const r of live) {
+    const g = game.get(r.gameId)!;
+    const ch = r.metrics.chances ?? 0;
+    const restCh = g.ch - ch;
+    if (restCh < MIN_REST_CHANCES) continue;
+    const restPae = (g.outs - (r.metrics.engagedOuts ?? 0)) - (g.exp - (r.metrics.expectedOuts ?? 0));
+    const delta = restPae / restCh;
+    r.metrics = { ...r.metrics, expectedOuts: (r.metrics.expectedOuts ?? 0) + delta * ch };
+  }
+
+  // Re-center per position so mean PAE/chance ≈ 0 again (the LOO step can drift
+  // it). Shift each row's expectedOuts by the position's mean PAE/chance ×
+  // chances — sums to exactly zero per position, restoring "0 = average here".
+  const pos = new Map<number, { pae: number; ch: number }>();
+  for (const r of live) {
+    if (r.position == null) continue;
+    const a = pos.get(r.position) ?? { pae: 0, ch: 0 };
+    a.pae += (r.metrics.engagedOuts ?? 0) - (r.metrics.expectedOuts ?? 0);
+    a.ch += r.metrics.chances ?? 0;
+    pos.set(r.position, a);
+  }
+  for (const r of live) {
+    if (r.position == null) continue;
+    const a = pos.get(r.position)!;
+    if (a.ch <= 0) continue;
+    const meanPaePerCh = a.pae / a.ch;
+    r.metrics = { ...r.metrics, expectedOuts: (r.metrics.expectedOuts ?? 0) + meanPaePerCh * (r.metrics.chances ?? 0) };
   }
 }
 
@@ -283,6 +407,7 @@ function aggregate(rows: { playerId: string; playerName: string; position: numbe
       stealAttempts: s.stealAttempts,
       caughtStealing: s.caughtStealing,
       csRate: s.stealAttempts > 0 ? Math.round((s.caughtStealing / s.stealAttempts) * 1000) / 1000 : null,
+      dp: s.dpInvolved, dpStarted: s.dpStarted, dpTurned: s.dpTurned, dpFinished: s.dpFinished,
       byPosition,
     });
   }
@@ -297,6 +422,7 @@ const NUMERIC_KEYS: (keyof PlayerGameMetrics)[] = [
   'putouts', 'assists', 'fieldErrors', 'chances', 'closePlays',
   'rangeSum', 'rangeCount', 'throwSpeedSum', 'throwSpeedCount', 'releaseSum', 'releaseCount',
   'expectedOuts', 'engagedOuts', 'leverageSum', 'stealAttempts', 'caughtStealing',
+  'dpInvolved', 'dpStarted', 'dpTurned', 'dpFinished',
 ];
 
 // GET — aggregated advanced stats across stored replay metrics.
@@ -346,10 +472,15 @@ export async function GET(
   // tracks what's on screen. Rows without raw chance data (pre-`engageDists`)
   // keep their stored, static-curve values.
   applyDynamicCurve(filtered);
+  // Strip the shared per-game fielding-difficulty component from PAE so a
+  // backup whose reps cluster in tougher games isn't penalized for context.
+  applyGameContext(filtered);
   const players = aggregate(filtered.map((r) => ({ playerId: r.playerId, playerName: r.playerName, position: r.position, metrics: r.metrics })));
   const forImportance = filtered.map((r) => ({ position: r.position, metrics: r.metrics }));
   const positionImportance = buildPositionImportance(forImportance);
   const statWeights = buildStatWeights(forImportance);
+  const heatBins = buildHeatBins(forImportance);
+  const sprayBins = buildSprayBins(filtered.map((r) => ({ metrics: r.metrics })));
 
-  return Response.json({ hasDb: true, players, totalGames, positionImportance, statWeights });
+  return Response.json({ hasDb: true, players, totalGames, positionImportance, statWeights, heatBins, sprayBins });
 }

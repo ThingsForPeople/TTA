@@ -40,6 +40,7 @@ import { ZoneCoverage } from './ZoneCoverage';
 
 interface Props {
   team: Team;
+  teamUuid: string;
   metaStore: PlayerMetaStore;
   onChange: (next: PlayerMetaStore) => void;
   // Fired after any stat-snapshot write (record/edit/delete) so the parent can
@@ -48,9 +49,61 @@ interface Props {
   onHistoryChange?: () => void;
 }
 
-export function RosterEditor({ team, metaStore, onChange, onHistoryChange }: Props) {
+// Order-insensitive signature of a player's talent bundle, so "detect" only
+// rewrites players whose talents actually changed (avoids churn / API writes).
+function talentSig(
+  talents: string[],
+  levels: Record<string, number> | undefined,
+  pitch: PitchTalent[] | undefined,
+): string {
+  const lv = Object.entries(levels ?? {}).filter(([, v]) => v > 1).sort();
+  const pt = (pitch ?? [])
+    .map((p) => [p.pitch, p.level, [...p.sub].map((s) => [s.name, s.level]).sort()])
+    .sort();
+  return JSON.stringify([[...talents].sort(), lv, pt]);
+}
+
+export function RosterEditor({ team, teamUuid, metaStore, onChange, onHistoryChange }: Props) {
   const [editingHistory, setEditingHistory] = useState<string | null>(null);
   const [historyVersion, setHistoryVersion] = useState(0);
+  const [detecting, setDetecting] = useState(false);
+  const [detectMsg, setDetectMsg] = useState<string | null>(null);
+
+  const detectTalents = async () => {
+    setDetecting(true);
+    setDetectMsg(null);
+    try {
+      const res = await fetch(`/api/team/${teamUuid}/talents`);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+      const detected = (json.players ?? {}) as Record<
+        string,
+        { name: string; talents: string[]; talentLevels: Record<string, number>; pitchTalents: PitchTalent[] }
+      >;
+      const next: PlayerMetaStore = { ...metaStore };
+      let changed = 0;
+      for (const [uuid, d] of Object.entries(detected)) {
+        const cur = metaStore[uuid] ?? emptyMeta();
+        if (talentSig(cur.talents, cur.talentLevels, cur.pitchTalents) ===
+            talentSig(d.talents, d.talentLevels, d.pitchTalents)) {
+          continue; // already matches the replay — leave the object reference
+        }
+        next[uuid] = { ...cur, talents: d.talents, talentLevels: d.talentLevels, pitchTalents: d.pitchTalents };
+        changed++;
+      }
+      const found = Object.keys(detected).length;
+      if (changed > 0) onChange(next);
+      setDetectMsg(
+        changed > 0
+          ? `Updated ${changed} of ${found} player${found === 1 ? '' : 's'} from the latest game.`
+          : `No changes — all ${found} players already match the latest replay.`,
+      );
+    } catch (e) {
+      setDetectMsg(e instanceof Error ? e.message : 'Detection failed');
+    } finally {
+      setDetecting(false);
+    }
+  };
 
   const updatePlayer = (uuid: string, updater: (m: PlayerMeta) => PlayerMeta) => {
     const current = metaStore[uuid] ?? emptyMeta();
@@ -76,15 +129,29 @@ export function RosterEditor({ team, metaStore, onChange, onHistoryChange }: Pro
         <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300">
           Roster
         </h2>
-        <span className="text-[10px] text-slate-500">
-          {Object.keys(metaStore).length}/{players.filter((p) => p.uuid).length} players tracked
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-slate-500">
+            {Object.keys(metaStore).length}/{players.filter((p) => p.uuid).length} players tracked
+          </span>
+          <button
+            type="button"
+            onClick={detectTalents}
+            disabled={detecting}
+            title="Pull talents + pitch talents from the team's latest game replay (overwrites the players who played)"
+            className="rounded border border-slate-700 px-2 py-0.5 text-[11px] text-slate-300 transition-colors hover:border-emerald-500 hover:text-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {detecting ? 'Detecting…' : 'Detect talents from replay'}
+          </button>
+        </div>
       </div>
 
-      <p className="mb-4 text-xs text-slate-500">
+      <p className="mb-1 text-xs text-slate-500">
         Sim stats and talents aren't in the public feed — enter them here as players level up.
-        Data saves automatically to your browser.
+        Data saves automatically to your browser. <span className="text-slate-400">Detect talents from replay</span> auto-fills
+        talents + pitch talents from the latest game (overwrites the 9 who played; run after games to cover more of the roster).
       </p>
+      {detectMsg && <p className="mb-3 text-xs text-emerald-300/90">{detectMsg}</p>}
+      {!detectMsg && <div className="mb-3" />}
 
       <div className="space-y-2">
         {players.map((player) => {

@@ -9,6 +9,8 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import type { PitchTalent } from './playerMeta';
+
 export interface BbMix {
   ground: number;
   line: number;
@@ -96,6 +98,10 @@ export interface FieldingLine {
   pae: number; // plays above expected, this game
   stealAttempts: number;
   caughtStealing: number;
+  dp: number; // double plays involved in (any role)
+  dpStarted: number;
+  dpTurned: number;
+  dpFinished: number;
 }
 
 export interface ReplayEvaluation {
@@ -130,6 +136,10 @@ export function fieldingLinesFromMetrics(metrics: GameMetrics): FieldingLine[] {
       pae: Math.round((p.engagedOuts - p.expectedOuts) * 10) / 10,
       stealAttempts: p.stealAttempts,
       caughtStealing: p.caughtStealing,
+      dp: p.dpInvolved ?? 0,
+      dpStarted: p.dpStarted ?? 0,
+      dpTurned: p.dpTurned ?? 0,
+      dpFinished: p.dpFinished ?? 0,
     }))
     .sort((a, b) => b.plays - a.plays || b.chances - a.chances);
 }
@@ -168,6 +178,79 @@ interface PlateAppearance {
   result: string;
   ev?: number;
   la?: number;
+}
+
+// ── Roster talent extraction ────────────────────────────────────────
+// The team-search scrape carries NO talents — only the replay roster does
+// (`players[].talents: [{ id, tier, displayName }]`). This pulls our side's
+// per-player talents into the playerMeta shape so they can auto-seed the
+// editor / batting-order optimizer. One replay covers the 9 who played that
+// game; accumulating across games builds full-roster coverage.
+
+export interface RosterTalents {
+  name: string;
+  talents: string[]; // batting/baserunning/fielding/zone displayNames
+  talentLevels: Record<string, number>; // displayName → tier, only when > 1
+  pitchTalents: PitchTalent[]; // pitch types with their sub-talents grouped in
+}
+
+// Pitch-TYPE ids (the arsenal). Mirrors talentClassify.ts PITCH_TYPE_ID_SET.
+const PITCH_TYPE_IDS = new Set([
+  'fastball', 'two_seam_fastball', 'cutter', 'sinker',
+  'changeup', 'curveball', 'slider', 'splitter', 'knuckleball',
+]);
+// Pitch SUB-talent ids modify a specific pitch: `zone:<pitch>:<zone>:<effect>`,
+// `base:<pitch>:...`, or legacy `pz_*`. The pitch key is the 2nd `:`-segment.
+const isPitchSubId = (id: string) =>
+  id.startsWith('zone:') || id.startsWith('base:') || id.startsWith('pz_');
+// Normalize a pitch key so the type id (`two_seam_fastball`) and the sub
+// segment (`twoSeamFastball`) collapse to the same bucket.
+const normPitchKey = (s: string) => s.replace(/[^a-z0-9]/gi, '').toLowerCase();
+
+export function extractRosterTalents(
+  raw: any,
+  teamUuid: string,
+): { matched: boolean; players: Record<string, RosterTalents> } {
+  const game = raw?.game ?? {};
+  const home = game.home ?? {};
+  const away = game.away ?? {};
+  const matched = teamUuid === home.id || teamUuid === away.id;
+  if (!matched) return { matched: false, players: {} };
+  const ours = away.id === teamUuid ? away : home;
+
+  const players: Record<string, RosterTalents> = {};
+  for (const p of ours.players ?? []) {
+    if (!p?.id) continue;
+    const name = `${p.firstName ?? ''} ${p.lastName ?? ''}`.trim() || p.id;
+    const talents: string[] = [];
+    const talentLevels: Record<string, number> = {};
+    const pitchByKey = new Map<string, PitchTalent>();
+    const pendingSubs: { key: string; name: string; level: number }[] = [];
+
+    for (const tal of p.talents ?? []) {
+      const id: string = tal?.id ?? '';
+      const display: string = tal?.displayName ?? id;
+      const level: number = typeof tal?.tier === 'number' ? tal.tier : 1;
+      if (!id) continue;
+      if (PITCH_TYPE_IDS.has(id)) {
+        pitchByKey.set(normPitchKey(id), { pitch: display, level, sub: [] });
+      } else if (isPitchSubId(id)) {
+        const seg = id.split(':')[1] ?? '';
+        pendingSubs.push({ key: normPitchKey(seg), name: display, level });
+      } else {
+        talents.push(display);
+        if (level > 1) talentLevels[display] = level; // match meta convention
+      }
+    }
+    // Attach each sub to its parent pitch (skip orphans — a sub can't exist
+    // without its pitch type, so an unmatched key just means it wasn't owned).
+    for (const s of pendingSubs) {
+      pitchByKey.get(s.key)?.sub.push({ name: s.name, level: s.level });
+    }
+
+    players[p.id] = { name, talents, talentLevels, pitchTalents: [...pitchByKey.values()] };
+  }
+  return { matched: true, players };
 }
 
 export function evaluateReplay(raw: any, ourTeamId?: string): ReplayEvaluation {
@@ -462,12 +545,46 @@ export interface PlayerGameMetrics {
   // catcher steal defense (opponent steal attempts faced + how many were caught)
   stealAttempts: number;
   caughtStealing: number;
-  // Raw per-engaged-chance records (distance covered + whether it was an out),
-  // so the out-curve can be re-fit and expectedOuts/PAE recomputed at QUERY time
-  // from whatever set is visible — instead of being frozen with the sync-time
-  // curve. Optional: rows synced before this field existed fall back to the
-  // stored (static-curve) expectedOuts/leverageSum until re-synced.
-  engageDists?: { d: number; o: boolean }[];
+  // Double-play participation (descriptive). `dpInvolved` = distinct DPs this
+  // fielder took part in (any role); the three role tallies break that down and
+  // are NOT mutually exclusive (a 3-6-3 starter is also the finisher), so they
+  // can sum to more than dpInvolved. These are tags layered on the putouts/
+  // assists already counted — not new outs. Detected from the `double_play`
+  // outcome label + the ordered fielding chain.
+  dpInvolved: number;
+  dpStarted: number; // fielded the ball that began the DP (the feed)
+  dpTurned: number; // recorded an out then relayed onward (the pivot)
+  dpFinished: number; // recorded the final out of the DP
+  // Raw per-engaged-chance records: distance covered (`d`) + whether it was an
+  // out (`o`), plus the integer field coordinates of the engagement (`x`,`y`,
+  // quantized — origin = home plate, +x = RF side, −y = deeper). `d`/`o` let the
+  // out-curve be re-fit and expectedOuts/PAE recomputed at QUERY time from the
+  // visible set; `x`/`y` feed the fielded-ball heat map. Optional: rows synced
+  // before a field existed fall back to stored values / are skipped until
+  // re-synced (x/y were added after d/o).
+  engageDists?: { d: number; o: boolean; x?: number; y?: number }[];
+  // Opponent batted-ball SPRAY faced this game (a true "where it was hit" set,
+  // including balls that got through — derived from batter.contact angle+depth,
+  // not from where a fielder caught it). Team-level, so stored ONLY on our
+  // pitcher's row to avoid duplication. `o` = we recorded the out (vs a hit).
+  oppSpray?: { x: number; y: number; o: boolean }[];
+}
+
+// Batted-ball spray geometry. `horizontalAngle` is a bearing where ≈ −90° is
+// straight to CF; −139 → left-field line, −38 → right-field line. `hitDepth` is
+// a categorical radial distance. Together they place the ball where it was HIT
+// (independent of fielding), so we can chart balls that got through too.
+const SPRAY_DEPTH_RADIUS: Record<string, number> = {
+  shortInfield: 12, infield: 24, shortOutfield: 48,
+  outfield: 64, warningTrack: 82, wall: 92, homerun: 100,
+};
+function sprayPoint(horizontalAngle: unknown, hitDepth: unknown): { x: number; y: number } | null {
+  if (typeof horizontalAngle !== 'number' || typeof hitDepth !== 'string') return null;
+  const r = SPRAY_DEPTH_RADIUS[hitDepth];
+  if (r == null) return null;
+  const theta = ((horizontalAngle + 90) * Math.PI) / 180; // 0 = straight CF
+  if (Math.abs(theta) > (55 * Math.PI) / 180) return null; // foul territory guard
+  return { x: Math.round(r * Math.sin(theta)), y: Math.round(-r * Math.cos(theta)) };
 }
 
 // Empirical out-conversion probability given how far a fielder had to travel to
@@ -543,6 +660,7 @@ export interface PlayerPositionSplit {
   closePlays: number;
   stealAttempts: number;
   caughtStealing: number;
+  dp: number; // double plays involved in at this position
 }
 
 // Per-player aggregate across multiple games (derived rates), returned by the
@@ -566,6 +684,8 @@ export interface AggregatedPlayer {
   pae: number; expectedOuts: number;
   // catcher steal defense
   stealAttempts: number; caughtStealing: number; csRate: number | null;
+  // double-play participation (descriptive), summed across games
+  dp: number; dpStarted: number; dpTurned: number; dpFinished: number;
   // per-position fielding splits (best-position breakdown), most-played first
   byPosition: PlayerPositionSplit[];
 }
@@ -597,6 +717,7 @@ function emptyMetrics(playerId: string, name: string, position: number | null): 
     rangeSum: 0, rangeCount: 0,
     throwSpeedSum: 0, throwSpeedCount: 0, throwSpeedMax: 0, releaseSum: 0, releaseCount: 0,
     expectedOuts: 0, engagedOuts: 0, leverageSum: 0, stealAttempts: 0, caughtStealing: 0,
+    dpInvolved: 0, dpStarted: 0, dpTurned: 0, dpFinished: 0,
     engageDists: [],
   };
 }
@@ -651,11 +772,17 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
   const matched = ourTeamId === home.id || ourTeamId === away.id;
   const ourSide: 'home' | 'away' = away.id === ourTeamId ? 'away' : 'home';
   const isOurs = (id?: string) => !!id && playerById.get(id)?.side === ourSide;
-  // Our starting catcher (position 2) — credited with steal defense.
+  // Our starting catcher (position 2) — credited with steal defense; and our
+  // pitcher (position 1) — carries the team-level opponent spray.
   let ourCatcherId: string | undefined;
+  let ourPitcherId: string | undefined;
   for (const [id, info] of playerById) {
-    if (info.side === ourSide && info.position === 2) { ourCatcherId = id; break; }
+    if (info.side !== ourSide) continue;
+    if (info.position === 2 && !ourCatcherId) ourCatcherId = id;
+    if (info.position === 1 && !ourPitcherId) ourPitcherId = id;
   }
+  const oppSpray: { x: number; y: number; o: boolean }[] = [];
+  let lastOppContact: { ha: unknown; depth: unknown } | undefined;
 
   const rows = new Map<string, PlayerGameMetrics>();
   const row = (id: string) => {
@@ -672,7 +799,7 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
   let lastContact: { ev?: number; la?: number } | undefined;
   let throwBuf: { throwerId: string; targetOut: string | null; base: number }[] = [];
   // Per-at-bat fielding state for the range-calibrated expected-outs metric.
-  const engageBuf = new Map<string, { dist: number; pos: number | null }>();
+  const engageBuf = new Map<string, { dist: number; pos: number | null; x?: number; y?: number }>();
   const outCredit = new Set<string>(); // fielders who recorded a PO/A this at-bat
   const stealRunners = new Set<string>(); // opponent runners who attempted a steal
   const outRunners = new Set<string>(); // runners retired this at-bat
@@ -685,7 +812,12 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
       r.leverageSum += p * (1 - p);
       const isOut = outCredit.has(fid);
       if (isOut) r.engagedOuts++;
-      (r.engageDists ??= []).push({ d: e.dist, o: isOut });
+      const pt: { d: number; o: boolean; x?: number; y?: number } = { d: e.dist, o: isOut };
+      if (typeof e.x === 'number' && typeof e.y === 'number') {
+        pt.x = Math.round(e.x); // quantize to integer field units — sub-unit is noise
+        pt.y = Math.round(e.y);
+      }
+      (r.engageDists ??= []).push(pt);
     }
     // Catcher steal defense: each opponent steal attempt is an in-doubt play.
     if (ourCatcherId && stealRunners.size > 0) {
@@ -712,6 +844,7 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
       flushFielding();
       curAB = abId;
       lastContact = undefined;
+      lastOppContact = undefined;
       throwBuf = [];
     }
 
@@ -750,6 +883,11 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
         }
         case 'batter.contact': {
           lastContact = { ev: pl.exitVelocity, la: pl.launchAngle };
+          // Opponent contact → buffer its spray geometry for when the at-bat
+          // outcome lands (skip fouls; those aren't balls in play).
+          if (batterSide && batterSide !== ourSide && !/^Foul/.test(pl.hitDirection ?? '')) {
+            lastOppContact = { ha: pl.horizontalAngle, depth: pl.hitDepth };
+          }
           break;
         }
         case 'batter.result': {
@@ -777,7 +915,13 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
               }
             }
           }
+          // Opponent batted ball → record its spray point + whether we got the out.
+          if (batterSide && batterSide !== ourSide && lastOppContact) {
+            const pt = sprayPoint(lastOppContact.ha, lastOppContact.depth);
+            if (pt) oppSpray.push({ x: pt.x, y: pt.y, o: !HIT_RESULTS.has(pl.result ?? '') });
+          }
           lastContact = undefined;
+          lastOppContact = undefined;
           break;
         }
         case 'fielder.catch': {
@@ -792,7 +936,7 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
               const dist = Math.hypot(cp.x - start.x, cp.y - start.y);
               r.rangeSum += dist;
               r.rangeCount++;
-              engageBuf.set(pl.fielderId, { dist, pos: info?.position ?? null });
+              engageBuf.set(pl.fielderId, { dist, pos: info?.position ?? null, x: cp.x, y: cp.y });
             }
           }
           break;
@@ -807,7 +951,7 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
             const start = info?.coord;
             const cp = pl.catchPoint;
             if (start && cp && typeof cp.x === 'number' && typeof cp.y === 'number') {
-              engageBuf.set(pl.fielderId, { dist: Math.hypot(cp.x - start.x, cp.y - start.y), pos: info?.position ?? null });
+              engageBuf.set(pl.fielderId, { dist: Math.hypot(cp.x - start.x, cp.y - start.y), pos: info?.position ?? null, x: cp.x, y: cp.y });
             }
           }
           break;
@@ -862,9 +1006,53 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
         }
       }
     }
+
+    // Double-play participation: if this play was labeled a DP, credit our
+    // fielders by role from the ordered fielding chain. Roles aren't exclusive
+    // (a 3-6-3 starter is also the finisher). Descriptive tags only — the outs
+    // themselves are already counted as putouts/assists above.
+    const evs = seg.events ?? [];
+    const isDP = evs.some((e: { type?: string; payload?: { result?: string } }) =>
+      e.type === 'batter.result' && e.payload?.result === 'double_play');
+    if (isDP) {
+      let starter: string | undefined; // first fielder to field the ball
+      const outs: { fid: string; i: number }[] = [];
+      const throwsBy = new Map<string, number[]>(); // fielderId → throw event indices
+      evs.forEach((e: { type?: string; payload?: Record<string, unknown> }, i: number) => {
+        const p = e.payload ?? {};
+        if (e.type === 'fielder.catch' && !starter && (p.catchType === 'ground' || p.catchType === 'fly')) {
+          starter = p.fielderId as string;
+        } else if (e.type === 'fielder.throw' && p.throwerId) {
+          const arr = throwsBy.get(p.throwerId as string) ?? [];
+          arr.push(i);
+          throwsBy.set(p.throwerId as string, arr);
+        } else if (e.type === 'runner.out' && p.fielderId) {
+          outs.push({ fid: p.fielderId as string, i });
+        }
+      });
+      if (outs.length >= 2) {
+        const involved = new Set<string>();
+        const credit = (fid: string | undefined, role: 'dpStarted' | 'dpTurned' | 'dpFinished') => {
+          if (!fid || !isOurs(fid)) return;
+          row(fid)[role]++;
+          involved.add(fid);
+        };
+        credit(starter, 'dpStarted');
+        credit(outs[outs.length - 1].fid, 'dpFinished');
+        // Pivot: recorded an out, then threw onward (a throw after that out).
+        for (const o of outs) {
+          if ((throwsBy.get(o.fid) ?? []).some((ti) => ti > o.i)) credit(o.fid, 'dpTurned');
+        }
+        for (const fid of involved) row(fid).dpInvolved++;
+      }
+    }
   }
 
   flushFielding(); // resolve the final at-bat's fielding engagements
+
+  // Stash the team-level opponent spray on our pitcher's row (single carrier,
+  // no duplication). Ensure the row exists even if the pitcher did nothing else.
+  if (oppSpray.length && ourPitcherId) row(ourPitcherId).oppSpray = oppSpray;
 
   return {
     ourSide,

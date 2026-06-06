@@ -4,7 +4,7 @@ import { isPitchSubTalent } from '../lib/talentClassify';
 import { Markdown } from './Markdown';
 import { RateLimitBadge } from './RateLimitBadge';
 import { readRateLimitBody, readRateLimitHeaders, useRateLimit } from '../hooks/useRateLimit';
-import type { PlayerMetaStore } from '../lib/playerMeta';
+import { MAX_TALENT_LEVEL, type PlayerMetaStore } from '../lib/playerMeta';
 import type { Player } from '../lib/types';
 
 interface Props {
@@ -238,8 +238,8 @@ export function TalentAdvisor({ players, metaStore, buildContext, buildCompactCo
       const existingLvl = existingTalentLevels.get(nameLower);
       let ownershipNote = '';
       if (existingLvl !== undefined) {
-        if (existingLvl >= 3) {
-          ownershipNote = ' ⚠️ ALREADY AT MAX LEVEL (Lv3) — cannot level further';
+        if (existingLvl >= MAX_TALENT_LEVEL) {
+          ownershipNote = ` ⚠️ ALREADY AT MAX LEVEL (Lv${MAX_TALENT_LEVEL}) — cannot level further`;
         } else {
           ownershipNote = ` ℹ️ Already owned at Lv${existingLvl} — this would LEVEL UP to Lv${existingLvl + 1}`;
         }

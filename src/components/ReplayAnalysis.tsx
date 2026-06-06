@@ -232,6 +232,7 @@ function FieldingTable({ lines }: { lines: FieldingLine[] }) {
               <th className="px-1.5 py-1 text-right">PO</th>
               <th className="px-1.5 py-1 text-right">A</th>
               <th className="px-1.5 py-1 text-right" title="Misplays">E</th>
+              <th className="px-1.5 py-1 text-right" title="Double plays turned (any role: started / pivoted / finished)">DP</th>
               <th className="px-1.5 py-1 text-right" title="Difficult plays converted">Tough</th>
               <th className="px-1.5 py-1 text-right" title="Avg distance covered to field a ball (sim units)">Range</th>
               <th className="px-1.5 py-1 text-right" title="Top throw speed">Arm↑</th>
@@ -247,6 +248,10 @@ function FieldingTable({ lines }: { lines: FieldingLine[] }) {
                 <td className="px-1.5 py-1 text-right font-mono text-slate-300">{f.putouts || '·'}</td>
                 <td className="px-1.5 py-1 text-right font-mono text-slate-300">{f.assists || '·'}</td>
                 <td className={'px-1.5 py-1 text-right font-mono ' + (f.fieldErrors ? 'text-red-400' : 'text-slate-600')}>{f.fieldErrors || '·'}</td>
+                <td
+                  className={'px-1.5 py-1 text-right font-mono ' + (f.dp ? 'text-emerald-300' : 'text-slate-600')}
+                  title={f.dp ? `${[f.dpStarted && `started ${f.dpStarted}`, f.dpTurned && `pivoted ${f.dpTurned}`, f.dpFinished && `finished ${f.dpFinished}`].filter(Boolean).join(', ')}` : undefined}
+                >{f.dp || '·'}</td>
                 <td className="px-1.5 py-1 text-right font-mono text-slate-300">{f.closePlays || '·'}</td>
                 <td className="px-1.5 py-1 text-right font-mono text-slate-300">{f.rangeAvg ?? '·'}</td>
                 <td className="px-1.5 py-1 text-right font-mono text-slate-300">{f.armMax ? Math.round(f.armMax) : '·'}</td>
