@@ -47,7 +47,11 @@ async function enumerateGames(uuid: string): Promise<GameRow[]> {
   for (let page = 0; page < MAX_PAGES; page++) {
     const res = await fetch(`${GAMES_PAGE}/${uuid}/games?offset=${page * 10}`, {
       headers: { Accept: 'application/json' },
-      next: { revalidate: 300 }, // games list barely changes — cache pages
+      // No cache: sync is a deliberate user action and must see games played
+      // moments ago. A cached page 0 (where newest games live) is exactly why
+      // sync used to need two presses — the first served a stale list and only
+      // warmed the cache; the second acted on it.
+      cache: 'no-store',
     });
     if (!res.ok) break;
     const json: any = await res.json();

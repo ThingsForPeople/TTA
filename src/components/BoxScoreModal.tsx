@@ -73,6 +73,7 @@ function gameModeName(mode: string): string {
     case 'quick_play': return 'Quickplay';
     case 'challenge': return 'Challenge';
     case 'season': return 'Season';
+    case 'gauntlet': return 'Gauntlet';
     default: return mode;
   }
 }

@@ -1,5 +1,5 @@
 import { getUser } from '@/lib/auth';
-import { and, eq, gte } from 'drizzle-orm';
+import { and, eq, gte, sql } from 'drizzle-orm';
 import { db, hasDb } from '@/db';
 import { replayMetrics } from '@/db/schema';
 import type { PlayerGameMetrics, AggregatedPlayer, PositionImportance, PlayerPositionSplit } from '@/lib/parseReplay';
@@ -369,7 +369,12 @@ function aggregate(rows: { playerId: string; playerName: string; position: numbe
     a.armMax = Math.max(a.armMax, m.throwSpeedMax ?? 0);
     // Per-position split: only count a game toward a position if the player
     // actually fielded there (had a chance or recorded an out/steal-defense).
-    if (r.position != null && (m.chances > 0 || m.putouts > 0 || m.assists > 0 || m.stealAttempts > 0)) {
+    // Catcher (2) is the exception: by model design it has no batted-ball
+    // chances, so this gate would collapse its game count to "games with a
+    // steal attempt" — badly under-reporting games CAUGHT. Count any game the
+    // player was the catcher; steal-relevant counts live in their own columns.
+    const fieldedHere = r.position === 2 || m.chances > 0 || m.putouts > 0 || m.assists > 0 || m.stealAttempts > 0;
+    if (r.position != null && fieldedHere) {
       let bp = a.byPos.get(r.position);
       if (!bp) { bp = { games: 0, sum: zeroSums() }; a.byPos.set(r.position, bp); }
       bp.games++;
@@ -443,7 +448,11 @@ export async function GET(
 
   const conds = [eq(replayMetrics.userId, userId), eq(replayMetrics.teamUuid, uuid)];
   if (days > 0) conds.push(gte(replayMetrics.completedAt, new Date(Date.now() - days * 86_400_000)));
+  // A specific mode isolates that mode (incl. gauntlet); the default "All" view
+  // EXCLUDES gauntlet so its non-representative roster doesn't pollute aggregate
+  // stats/importance. `is distinct from` keeps null-mode rows (pre-mode syncs).
   if (mode) conds.push(eq(replayMetrics.gameMode, mode));
+  else conds.push(sql`${replayMetrics.gameMode} is distinct from 'gauntlet'`);
 
   const rows = await db
     .select({

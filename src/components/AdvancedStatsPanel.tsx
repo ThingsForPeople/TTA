@@ -753,10 +753,11 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
               ))}
             </div>
             <select value={mode} onChange={(e) => setMode(e.target.value)} className="rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-slate-300">
-              <option value="">All modes</option>
+              <option value="">All (excl. gauntlet)</option>
               <option value="season">Season</option>
               <option value="quick_play">Quickplay</option>
               <option value="challenge">Challenge</option>
+              <option value="gauntlet">Gauntlet</option>
             </select>
             <label className="flex items-center gap-1 text-slate-400">
               Last
