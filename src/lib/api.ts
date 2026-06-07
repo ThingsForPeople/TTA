@@ -33,7 +33,7 @@ export type TimeFilter =
   | 'g50'
   | 'g100';
 
-export type ModeFilter = 'all' | 'quick_play' | 'challenge' | 'season';
+export type ModeFilter = 'all' | 'quick_play' | 'challenge' | 'season' | 'gauntlet';
 
 export const TIME_OPTIONS: { value: TimeFilter; label: string }[] = [
   { value: 'all', label: 'All-time' },
@@ -54,6 +54,7 @@ export const MODE_OPTIONS: { value: ModeFilter; label: string }[] = [
   { value: 'quick_play', label: 'Quickplay' },
   { value: 'challenge', label: 'Challenge' },
   { value: 'season', label: 'Season' },
+  { value: 'gauntlet', label: 'Gauntlet' },
 ];
 
 const LAST_N_GAMES: Partial<Record<TimeFilter, number>> = {

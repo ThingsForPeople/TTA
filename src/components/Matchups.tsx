@@ -9,7 +9,7 @@ import { BoxScoreModal } from './BoxScoreModal';
 
 // Cap how many games the AI pass fetches replays for (each is an upstream
 // ~2.8MB parse) so the subset stays gentle on the source and the context sane.
-const AI_MAX_GAMES = 8;
+const AI_MAX_GAMES = 10;
 
 interface GameRow {
   gameId: string;
