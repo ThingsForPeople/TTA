@@ -26,15 +26,16 @@ const DATA_WEIGHT = 0.35;
 // Position importance derived from real fielding workload: how much defensive
 // action (and how much skill-sensitive action) flows through each spot.
 function buildPositionImportance(rows: { position: number | null; metrics: PlayerGameMetrics }[]): PositionImportance[] {
-  const acc: Record<string, { ch: number; xo: number; lev: number }> = {};
+  const acc: Record<string, { ch: number; xo: number; lev: number; games: number }> = {};
   for (const r of rows) {
     if (r.position == null) continue;
     const ps = POS_NUM_TO_STR[r.position];
     if (!ps || ps === 'P') continue;
-    (acc[ps] ??= { ch: 0, xo: 0, lev: 0 });
+    (acc[ps] ??= { ch: 0, xo: 0, lev: 0, games: 0 });
     acc[ps].ch += r.metrics.chances ?? 0;
     acc[ps].xo += r.metrics.expectedOuts ?? 0;
     acc[ps].lev += r.metrics.leverageSum ?? 0;
+    acc[ps].games++; // one row = one fielder-game manned here
   }
   const present = FIELD_POS_STR.filter((p) => acc[p]);
   if (present.length === 0) return [];
@@ -75,6 +76,8 @@ function buildPositionImportance(rows: { position: number | null; metrics: Playe
       return {
         position: p,
         chances: acc[p].ch,
+        games: acc[p].games,
+        chancesPerGame: acc[p].games ? Math.round((acc[p].ch / acc[p].games) * 100) / 100 : 0,
         xOuts: Math.round(acc[p].xo * 10) / 10,
         leverage: Math.round(acc[p].lev * 10) / 10,
         impVolume: mCh ? r2(acc[p].ch / mCh) : 1,

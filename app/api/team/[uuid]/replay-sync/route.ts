@@ -42,18 +42,48 @@ interface GameRow {
   opponentName: string | null;
 }
 
-async function enumerateGames(uuid: string): Promise<GameRow[]> {
+// Fetch one games-list page with retry/backoff. The upstream rate-limits under
+// load (the same overload that 504s replay fetches), and these list pages are
+// fetched no-store (see below), so without retrying a single transient 429 on
+// page 0 truncates the whole sync list to empty. Time-boxed per attempt.
+async function fetchGamesPage(uuid: string, page: number): Promise<Response | null> {
+  for (let i = 0; i < 3; i++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 12_000);
+    try {
+      const res = await fetch(`${GAMES_PAGE}/${uuid}/games?offset=${page * 10}`, {
+        headers: { Accept: 'application/json' },
+        // No cache: sync is a deliberate user action and must see games played
+        // moments ago. A cached page 0 (where newest games live) is exactly why
+        // sync used to need two presses — the first served a stale list and only
+        // warmed the cache; the second acted on it.
+        cache: 'no-store',
+        signal: ctrl.signal,
+      });
+      if (res.status === 429 || res.status >= 500) {
+        const retryAfter = Number(res.headers.get('retry-after'));
+        await sleep(retryAfter > 0 ? retryAfter * 1000 : 800 * (i + 1));
+        continue;
+      }
+      return res;
+    } catch {
+      await sleep(800 * (i + 1)); // aborted (timeout) or network error
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return null;
+}
+
+// Returns the recency-windowed games list and whether the upstream failed while
+// enumerating (so the caller can distinguish "no games" from "couldn't reach the
+// source" and surface a clear retry message instead of silently syncing nothing).
+async function enumerateGames(uuid: string): Promise<{ games: GameRow[]; upstreamError: boolean }> {
   const games: GameRow[] = [];
+  let upstreamError = false;
   for (let page = 0; page < MAX_PAGES; page++) {
-    const res = await fetch(`${GAMES_PAGE}/${uuid}/games?offset=${page * 10}`, {
-      headers: { Accept: 'application/json' },
-      // No cache: sync is a deliberate user action and must see games played
-      // moments ago. A cached page 0 (where newest games live) is exactly why
-      // sync used to need two presses — the first served a stale list and only
-      // warmed the cache; the second acted on it.
-      cache: 'no-store',
-    });
-    if (!res.ok) break;
+    const res = await fetchGamesPage(uuid, page);
+    if (!res || !res.ok) { upstreamError = true; break; } // keep what we have; flag the blip
     const json: any = await res.json();
     for (const g of json.results ?? []) {
       games.push({
@@ -68,9 +98,10 @@ async function enumerateGames(uuid: string): Promise<GameRow[]> {
     if (!json.has_more || games.length >= SYNC_LIMIT) break;
   }
   // Keep only the most-recent SYNC_LIMIT games (recency matters most).
-  return games
+  const windowed = games
     .sort((a, b) => (b.completedAt ? Date.parse(b.completedAt) : 0) - (a.completedAt ? Date.parse(a.completedAt) : 0))
     .slice(0, SYNC_LIMIT);
+  return { games: windowed, upstreamError };
 }
 
 // GET — list every game for the team plus the set already synced, so the
@@ -87,7 +118,7 @@ export async function GET(
     return Response.json({ hasDb: false, games: [], syncedGameIds: [] });
   }
 
-  const games = await enumerateGames(uuid);
+  const { games, upstreamError } = await enumerateGames(uuid);
   const syncedRows = await db
     .select({ gameId: replaySyncs.gameId })
     .from(replaySyncs)
@@ -96,6 +127,7 @@ export async function GET(
   return Response.json({
     hasDb: true,
     games,
+    upstreamError, // true if a list page failed after retries — caller can warn
     syncedGameIds: syncedRows.map((r) => r.gameId),
   });
 }
