@@ -577,7 +577,14 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
         const total: number = (list.games ?? []).length;
         const todo = (list.games ?? []).filter((g: { gameId: string }) => !synced.has(g.gameId));
         setProgress({ done: total - todo.length, total });
-        if (todo.length === 0) break;
+        if (todo.length === 0) {
+          // Nothing to do AND the game list came back short because upstream
+          // failed — say so, rather than looking like a successful no-op sync.
+          if (list.upstreamError && total === 0) {
+            setError('Couldn’t reach the replay source (it’s rate-limiting right now). Try Sync again in a moment.');
+          }
+          break;
+        }
         if (todo.length >= prevRemaining) {
           // No progress this round — stop and report the stragglers.
           setError(`${todo.length} game(s) couldn’t be synced (upstream errors). Try Sync again later.`);
@@ -807,7 +814,7 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
                   return (
                     <span
                       key={pi.position}
-                      title={`${pi.chances} chances · ${pi.xOuts} expected outs${pi.impLeverage != null ? ` · leverage-share ×${pi.impLeverage.toFixed(2)}` : ''} · workload-share ×${pi.impXouts.toFixed(2)} → recommended ×${effImp(pi).toFixed(2)}`}
+                      title={`${pi.chancesPerGame}/g chances (${pi.chances} over ${pi.games} g) · ${pi.xOuts} expected outs${pi.impLeverage != null ? ` · leverage-share ×${pi.impLeverage.toFixed(2)}` : ''} · workload-share ×${pi.impXouts.toFixed(2)} → recommended ×${effImp(pi).toFixed(2)}`}
                       className="rounded bg-slate-800 px-1.5 py-0.5 text-[11px]"
                     >
                       <span className="font-medium text-slate-300">{pi.position}</span>{' '}
@@ -816,6 +823,7 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
                       <span className={'ml-0.5 ' + (delta > 0.05 ? 'text-emerald-500/70' : delta < -0.05 ? 'text-red-500/70' : 'text-slate-600')}>
                         {Math.abs(delta) < 0.05 ? '' : delta > 0 ? '▲' : '▼'}
                       </span>
+                      <span className="ml-1 font-mono text-slate-500" title="Batted-ball chances engaged per game at this position">{pi.chancesPerGame.toFixed(1)}/g</span>
                     </span>
                   );
                 })}
@@ -824,6 +832,7 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
                 Multiplier = a blend of skill-leverage (outs genuinely in doubt — where a good vs. replacement glove swings the most)
                 and workload (expected outs handled), normalized to mean 1.0, vs the current default. Blending damps small-sample
                 noise; the catcher is floored to its default since its only leverage signal is caught-stealing.
+                The <span className="font-mono text-slate-500">N/g</span> badge is batted-ball chances engaged per game at that spot (raw workload — re-syncs as new games land, so you can track it over time).
               </p>
             </div>
           )}

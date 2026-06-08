@@ -224,8 +224,8 @@ export const DEFAULT_STAT_WEIGHTS: StatWeights = {
   C:   { fld: 0.42, arm: 0.48, spd: 0.10 }, // caught-stealing arm #1, receiving close
   '1B': { fld: 0.55, arm: 0.10, spd: 0.35 }, // receiver — scoops throws, barely throws
   CF:  { fld: 0.18, arm: 0.20, spd: 0.62 }, // speed by a longshot; arm ≈ fld
-  LF:  { fld: 0.19, arm: 0.21, spd: 0.60 }, // speed by a longshot; arm ≈ fld
-  RF:  { fld: 0.20, arm: 0.24, spd: 0.56 }, // speed-led; slightly stronger arm than LF/CF
+  LF:  { fld: 0.20, arm: 0.17, spd: 0.63 }, // low-arm corner — replay assists ≈0/g; hide a fast/weak arm here
+  RF:  { fld: 0.20, arm: 0.30, spd: 0.50 }, // strong-arm corner — the long throw (3B/home); replay assists ~0.38/g
 };
 
 const STAT_LABELS: Record<string, string> = { fld: 'FLD', arm: 'ARM', spd: 'SPD' };

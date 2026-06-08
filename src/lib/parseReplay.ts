@@ -694,6 +694,8 @@ export interface AggregatedPlayer {
 export interface PositionImportance {
   position: string;
   chances: number;
+  games: number; // fielder-games manned at this position (chances/game denominator)
+  chancesPerGame: number; // batted-ball chances engaged per game — workload signal
   xOuts: number;
   leverage: number;
   impVolume: number; // chances share, normalized to mean 1.0
