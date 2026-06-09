@@ -257,7 +257,8 @@ export function TalentAdvisor({ players, metaStore, buildContext, buildCompactCo
       'so judge purely on effect and synergy, not on whether it is a level-up vs. a new talent. ' +
       'Consider: synergy with existing talents and pitch repertoire, ' +
       "how it fits the player's position and stats, and whether any option is clearly better or worse. " +
-      'Give a clear recommendation with reasoning. Be concise — bullets, not paragraphs.'
+      'Give a clear recommendation with reasoning. Be concise — bullets, not paragraphs.' +
+      'If no talents are genuine improvements then suggest that I pick one and reroll it.'
     );
     return lines.join('\n');
   }, [player, meta, filledOptions]);
