@@ -5,9 +5,9 @@ import { usage, users } from '@/db/schema';
 const WINDOW_MS = 60 * 60 * 1000; // 1 hour
 
 const LIMITS: Record<string, number> = {
-  insight: 3,
-  recruit: 3,
-  'talent-advisor': 5,
+  insight: 10,
+  recruit: 10,
+  'talent-advisor': 10,
   'game-analysis': 10,     // single-game AI analysis (one model call each)
   'matchup-analysis': 5,   // multi-game AI analysis (heavier: also fetches several replays)
 };
