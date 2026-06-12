@@ -136,14 +136,14 @@ export function AppShell({
 
       {/* Tab bar */}
       <nav className="border-b border-slate-800 px-4 sm:px-6">
-        <div className="flex gap-1">
+        <div className="-mb-px flex gap-1 overflow-x-auto">
           {visibleTabs.map((t) => (
             <button
               key={t.value}
               type="button"
               onClick={() => setTab(t.value)}
               className={
-                '-mb-px px-3 py-2 text-sm font-medium uppercase tracking-wider transition-colors ' +
+                'shrink-0 whitespace-nowrap px-3 py-2 text-sm font-medium uppercase tracking-wider transition-colors ' +
                 (tab === t.value
                   ? 'border-b-2 border-emerald-400 text-emerald-400'
                   : 'text-slate-400 hover:text-slate-200')

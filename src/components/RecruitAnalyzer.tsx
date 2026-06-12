@@ -266,9 +266,9 @@ export function RecruitAnalyzer({ open, onClose, buildContext, buildCompactConte
                 <div className="mb-1 text-[10px] uppercase tracking-wider text-slate-500">
                   Sim stats
                 </div>
-                <div className="grid grid-cols-7 gap-1.5">
+                <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-7">
                   {RECRUIT_STAT_ORDER.map((k) => (
-                    <label key={k} className="flex flex-col text-center">
+                    <label key={k} className="flex min-w-0 flex-col text-center">
                       <span className="text-[10px] uppercase tracking-wider text-slate-500">
                         {SIM_LABELS[k]}
                       </span>
@@ -280,7 +280,7 @@ export function RecruitAnalyzer({ open, onClose, buildContext, buildCompactConte
                         onChange={(e) =>
                           setSim((prev) => ({ ...prev, [k]: clamp(Number(e.target.value)) }))
                         }
-                        className="mt-0.5 rounded border border-slate-700 bg-slate-950 px-1 py-1 text-center font-mono text-sm text-slate-100 focus:border-emerald-500 focus:outline-none"
+                        className="mt-0.5 w-full min-w-0 rounded border border-slate-700 bg-slate-950 px-1 py-1 text-center font-mono text-sm text-slate-100 focus:border-emerald-500 focus:outline-none"
                       />
                     </label>
                   ))}

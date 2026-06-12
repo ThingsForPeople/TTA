@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ALL_TALENTS, CATEGORY_COLORS, type TalentDef } from '../lib/talents';
 import { MAX_TALENT_LEVEL } from '../lib/playerMeta';
+import { useDropdownPosition } from '../hooks/useDropdownPosition';
 
 interface Props {
   selected: string[];
@@ -18,7 +19,7 @@ export function TalentPicker({ selected, levels, onChange, onLevelChange, availa
   const [highlightIdx, setHighlightIdx] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const [dropPos, setDropPos] = useState<{ top: number; left: number } | null>(null);
+  const dropPos = useDropdownPosition(inputRef, open, 256);
   const listRef = useRef<HTMLUListElement>(null);
 
   const selectedSet = new Set(selected);
@@ -49,17 +50,6 @@ export function TalentPicker({ selected, levels, onChange, onLevelChange, availa
     const item = listRef.current.children[highlightIdx] as HTMLElement | undefined;
     item?.scrollIntoView({ block: 'nearest' });
   }, [highlightIdx, open]);
-
-  const updateDropPos = () => {
-    if (!inputRef.current) return;
-    const rect = inputRef.current.getBoundingClientRect();
-    setDropPos({ top: rect.bottom + 4, left: rect.left });
-  };
-
-  const openDropdown = () => {
-    setOpen(true);
-    updateDropPos();
-  };
 
   const add = (name: string) => {
     onChange([...selected, name]);
@@ -142,19 +132,19 @@ export function TalentPicker({ selected, levels, onChange, onLevelChange, availa
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
-            openDropdown();
+            setOpen(true);
           }}
-          onFocus={openDropdown}
+          onFocus={() => setOpen(true)}
           onKeyDown={onKeyDown}
           placeholder="type to search talents…"
-          className="w-48 rounded border border-slate-700 bg-slate-950 px-2 py-0.5 text-xs text-slate-100 placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none"
+          className="w-48 max-w-full rounded border border-slate-700 bg-slate-950 px-2 py-0.5 text-xs text-slate-100 placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none"
         />
 
         {open && filtered.length > 0 && dropPos ? (
           <ul
             ref={listRef}
-            className="fixed z-[100] max-h-48 w-64 overflow-y-auto rounded border border-slate-700 bg-slate-900 shadow-lg"
-            style={{ top: dropPos.top, left: dropPos.left }}
+            className="fixed z-[100] max-h-48 overflow-y-auto rounded border border-slate-700 bg-slate-900 shadow-lg"
+            style={{ top: dropPos.top, left: dropPos.left, width: dropPos.width }}
           >
             {filtered.slice(0, 30).map((t, i) => (
               <DropdownItem

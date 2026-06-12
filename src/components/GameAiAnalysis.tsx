@@ -12,6 +12,12 @@ export const GAME_EVAL_PROMPT =
   '3. PROCESS vs RESULT — call out where the box score lies: our hard-hit balls that were caught ' +
   '(unlucky) or weak contact that fell in (lucky), so I don\'t over-react to the final line.\n' +
   '4. ONE TAKEAWAY — the single most useful adjustment, if any.\n\n' +
+  'CRITICAL CONSTRAINT — the ONLY two things I can change between games are (a) the BATTING ORDER ' +
+  '(who hits in which of the 9 slots) and (b) FIELD POSITIONING (which player plays which defensive ' +
+  'position). Pitch execution is NOT correctable: I cannot change pitch selection/usage, location, ' +
+  'a pitcher\'s arsenal, talents, sim stats, archetypes, or who starts. Mistake pitches may be NOTED ' +
+  'in sections 1-3 as context for why runs scored, but never framed as something to fix — the takeaway ' +
+  'in section 4 must be a batting-order or field-positioning move (or "no change warranted").\n\n' +
   'A single game is a tiny sample — do NOT over-read fielding PAE or one good/bad inning, and don\'t ' +
   'recommend roster overhauls off one game. Be concise — bullets, not paragraphs.';
 

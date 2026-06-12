@@ -4,7 +4,16 @@ html, body, #root {
   min-height: 100vh;
 }
 
+/* Backstop: the page must never scroll horizontally on mobile. `clip` (not
+   `hidden`) so no scroll container is created and position:sticky keeps working. */
+html, body {
+  overflow-x: clip;
+}
+
 /* AI response HTML styling */
+.ai-html {
+  overflow-wrap: break-word;
+}
 .ai-html h1, .ai-html h2, .ai-html h3 {
   font-weight: 600;
   color: var(--color-slate-100);
@@ -45,6 +54,9 @@ html, body, #root {
   margin-top: 0.5rem;
   margin-bottom: 0.5rem;
   font-size: 0.8125rem;
+  /* wide AI tables scroll within the bubble instead of blowing out the page */
+  display: block;
+  overflow-x: auto;
 }
 .ai-html th {
   text-align: left;
