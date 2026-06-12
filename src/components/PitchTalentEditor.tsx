@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { CATEGORY_COLORS, type TalentDef } from '../lib/talents';
+import { useDropdownPosition } from '../hooks/useDropdownPosition';
 import { PITCH_SUB_TALENTS, PITCH_TYPE_TALENTS } from '../lib/talentClassify';
 import { MAX_TALENT_LEVEL, type PitchTalent } from '../lib/playerMeta';
 
@@ -48,7 +49,7 @@ function SubTalentDropdown({
   const [highlightIdx, setHighlightIdx] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const [dropPos, setDropPos] = useState<{ top: number; left: number } | null>(null);
+  const dropPos = useDropdownPosition(inputRef, open, 256);
 
   const lower = query.toLowerCase();
   const filtered = PITCH_SUB_TALENTS.filter(
@@ -66,12 +67,6 @@ function SubTalentDropdown({
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
-  const updatePos = () => {
-    if (!inputRef.current) return;
-    const rect = inputRef.current.getBoundingClientRect();
-    setDropPos({ top: rect.bottom + 4, left: rect.left });
-  };
-
   return (
     <div ref={containerRef} className="relative">
       <input
@@ -81,9 +76,8 @@ function SubTalentDropdown({
           setQuery(e.target.value);
           setHighlightIdx(0);
           setOpen(true);
-          updatePos();
         }}
-        onFocus={() => { setOpen(true); updatePos(); }}
+        onFocus={() => setOpen(true)}
         onKeyDown={(e) => {
           if (e.key === 'ArrowDown') {
             e.preventDefault();
@@ -103,12 +97,12 @@ function SubTalentDropdown({
           }
         }}
         placeholder="add zone/aim talent..."
-        className="w-44 rounded border border-slate-700 bg-slate-950 px-2 py-0.5 text-xs text-slate-100 placeholder:text-slate-600 focus:border-amber-500 focus:outline-none"
+        className="w-44 max-w-full rounded border border-slate-700 bg-slate-950 px-2 py-0.5 text-xs text-slate-100 placeholder:text-slate-600 focus:border-amber-500 focus:outline-none"
       />
       {open && filtered.length > 0 && dropPos && (
         <ul
-          className="fixed z-[100] max-h-40 w-64 overflow-y-auto rounded border border-slate-700 bg-slate-900 shadow-lg"
-          style={{ top: dropPos.top, left: dropPos.left }}
+          className="fixed z-[100] max-h-40 overflow-y-auto rounded border border-slate-700 bg-slate-900 shadow-lg"
+          style={{ top: dropPos.top, left: dropPos.left, width: dropPos.width }}
         >
           {filtered.slice(0, 20).map((t, i) => (
             <li
@@ -145,7 +139,7 @@ function PitchTypeDropdown({
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
-  const [dropPos, setDropPos] = useState<{ top: number; left: number } | null>(null);
+  const dropPos = useDropdownPosition(btnRef, open, 224);
 
   const available = PITCH_TYPE_TALENTS.filter((t) => !exclude.has(t.name));
 
@@ -167,21 +161,15 @@ function PitchTypeDropdown({
       <button
         ref={btnRef}
         type="button"
-        onClick={() => {
-          if (btnRef.current) {
-            const rect = btnRef.current.getBoundingClientRect();
-            setDropPos({ top: rect.bottom + 4, left: rect.left });
-          }
-          setOpen((v) => !v);
-        }}
+        onClick={() => setOpen((v) => !v)}
         className="rounded border border-dashed border-amber-500/40 px-2 py-1 text-xs text-amber-300/80 hover:bg-amber-500/10"
       >
         + add pitch
       </button>
       {open && dropPos && (
         <ul
-          className="fixed z-[100] max-h-48 w-56 overflow-y-auto rounded border border-slate-700 bg-slate-900 shadow-lg"
-          style={{ top: dropPos.top, left: dropPos.left }}
+          className="fixed z-[100] max-h-48 overflow-y-auto rounded border border-slate-700 bg-slate-900 shadow-lg"
+          style={{ top: dropPos.top, left: dropPos.left, width: dropPos.width }}
         >
           {available.map((t) => (
             <li

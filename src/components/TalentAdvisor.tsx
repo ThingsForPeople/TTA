@@ -4,6 +4,7 @@ import { isPitchSubTalent } from '../lib/talentClassify';
 import { Markdown } from './Markdown';
 import { RateLimitBadge } from './RateLimitBadge';
 import { readRateLimitBody, readRateLimitHeaders, useRateLimit } from '../hooks/useRateLimit';
+import { useDropdownPosition } from '../hooks/useDropdownPosition';
 import { MAX_TALENT_LEVEL, type PlayerMetaStore } from '../lib/playerMeta';
 import type { Player } from '../lib/types';
 
@@ -38,7 +39,7 @@ function TalentOption({
   const [highlightIdx, setHighlightIdx] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const [dropPos, setDropPos] = useState<{ top: number; left: number } | null>(null);
+  const dropPos = useDropdownPosition(inputRef, open && !value.name, 288);
 
   const lower = query.toLowerCase();
   const filtered = query
@@ -47,12 +48,6 @@ function TalentOption({
 
   const selectedDef = value.name ? ALL_TALENTS.find((t) => t.name === value.name) : undefined;
   const needsPitch = value.name && isPitchSubTalent(value.name) && pitchTypes.length > 0;
-
-  const updateDropPos = () => {
-    if (!inputRef.current) return;
-    const rect = inputRef.current.getBoundingClientRect();
-    setDropPos({ top: rect.bottom + 4, left: rect.left });
-  };
 
   const select = (name: string) => {
     onChange({ name });
@@ -119,9 +114,8 @@ function TalentOption({
             setQuery(e.target.value);
             setHighlightIdx(0);
             setOpen(true);
-            updateDropPos();
           }}
-          onFocus={() => { setOpen(true); updateDropPos(); }}
+          onFocus={() => setOpen(true)}
           onKeyDown={(e) => {
             if (e.key === 'ArrowDown') {
               e.preventDefault();
@@ -144,8 +138,8 @@ function TalentOption({
 
       {open && !value.name && filtered.length > 0 && dropPos && (
         <ul
-          className="fixed z-[100] max-h-48 w-72 overflow-y-auto rounded border border-slate-700 bg-slate-900 shadow-lg"
-          style={{ top: dropPos.top, left: dropPos.left }}
+          className="fixed z-[100] max-h-48 overflow-y-auto rounded border border-slate-700 bg-slate-900 shadow-lg"
+          style={{ top: dropPos.top, left: dropPos.left, width: dropPos.width }}
         >
           {filtered.slice(0, 30).map((t, i) => (
             <li

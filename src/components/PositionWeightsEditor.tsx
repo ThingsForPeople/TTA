@@ -108,7 +108,7 @@ export function PositionWeightsEditor({ teamUuid, weights, statWeights, onWeight
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 w-[24rem] rounded-lg border border-slate-700 bg-slate-900 p-3 shadow-xl">
+        <div className="absolute right-0 top-full z-50 mt-1 w-[24rem] max-w-[calc(100vw-2rem)] rounded-lg border border-slate-700 bg-slate-900 p-3 shadow-xl">
           <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">
             Position weights
           </h3>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { TeamSearchBox } from './TeamSearchBox';
 
 interface Props {
   uuid: string;
@@ -102,6 +103,15 @@ export function TeamLookup({ uuid, onChange, loading, compact }: Props) {
     );
   }
 
+  const search = (
+    <TeamSearchBox
+      placeholder="Search team by name…"
+      inputClassName="min-w-[min(18rem,100%)] w-full"
+      onPick={(t) => handleSelect(t.id)}
+      autoFocus={compact}
+    />
+  );
+
   const form = (
     <form
       className="flex flex-wrap items-center gap-2"
@@ -116,10 +126,9 @@ export function TeamLookup({ uuid, onChange, loading, compact }: Props) {
       <input
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder="enter team UUID"
-        className="min-w-[22rem] flex-1 rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-xs text-slate-200 focus:border-emerald-500 focus:outline-none"
+        placeholder="or paste a team UUID"
+        className="min-w-[min(22rem,100%)] flex-1 rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-xs text-slate-200 focus:border-emerald-500 focus:outline-none"
         spellCheck={false}
-        autoFocus={compact}
       />
       <button
         type="submit"
@@ -166,6 +175,7 @@ export function TeamLookup({ uuid, onChange, loading, compact }: Props) {
     return (
       <div className="space-y-2">
         {recentList}
+        {search}
         {form}
         {value.trim() && !valid ? (
           <p className="mt-1 text-xs text-amber-300">Doesn't look like a UUID.</p>
@@ -182,6 +192,7 @@ export function TeamLookup({ uuid, onChange, loading, compact }: Props) {
       </div>
       <div className="mt-3 space-y-3">
         {recentList}
+        {search}
         {form}
       </div>
       {value.trim() && !valid ? (

@@ -6,6 +6,7 @@ import type { ReplayEvaluation } from '../lib/parseReplay';
 import { buildGamesContext } from '../lib/gameSummary';
 import { GameAiAnalysis } from './GameAiAnalysis';
 import { BoxScoreModal } from './BoxScoreModal';
+import { TeamSearchBox } from './TeamSearchBox';
 
 // Cap how many games the AI pass fetches replays for (each is an upstream
 // ~2.8MB parse) so the subset stays gentle on the source and the context sane.
@@ -219,7 +220,10 @@ export function Matchups({ teamUuid, seedGames = [] }: { teamUuid: string; seedG
 
       {/* Controls: opponent search + filters */}
       <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
-        <OpponentSearch selectedName={oppName} onPick={pickOpponent} />
+        <TeamSearchBox
+          placeholder={oppName ? `vs ${oppName} — search to change…` : 'Search opponent team…'}
+          onPick={pickOpponent}
+        />
         <div className="flex rounded border border-slate-700">
           {TIME_FILTERS.map((tf) => (
             <button
@@ -331,91 +335,3 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
   );
 }
 
-interface TeamSearchRow {
-  teamId: string;
-  teamName: string;
-  managerName: string | null;
-  wins: number | null;
-  losses: number | null;
-  teamLevel: number | null;
-}
-
-// Debounced team-name search over tiny-teams (via our /api/team-search proxy) so
-// the opponent can be any team, not just ones in our game history. One cheap
-// upstream call per (debounced) query; results pick the opponent by id + name.
-function OpponentSearch({
-  selectedName,
-  onPick,
-}: {
-  selectedName: string;
-  onPick: (t: { id: string; name: string }) => void;
-}) {
-  const [q, setQ] = useState('');
-  const [results, setResults] = useState<TeamSearchRow[]>([]);
-  const [open, setOpen] = useState(false);
-  const [searching, setSearching] = useState(false);
-
-  useEffect(() => {
-    const query = q.trim();
-    if (query.length < 2) { setResults([]); setSearching(false); return; }
-    let cancelled = false;
-    setSearching(true);
-    const t = setTimeout(async () => {
-      try {
-        const res = await fetch(`/api/team-search?query=${encodeURIComponent(query)}`);
-        const json = await res.json().catch(() => ({}));
-        if (!cancelled) setResults((json.results ?? []) as TeamSearchRow[]);
-      } catch {
-        if (!cancelled) setResults([]);
-      } finally {
-        if (!cancelled) setSearching(false);
-      }
-    }, 300);
-    return () => { cancelled = true; clearTimeout(t); };
-  }, [q]);
-
-  const showMenu = open && q.trim().length >= 2;
-
-  return (
-    <div className="relative">
-      <input
-        value={q}
-        onChange={(e) => { setQ(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
-        placeholder={selectedName ? `vs ${selectedName} — search to change…` : 'Search opponent team…'}
-        className="w-60 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-slate-200 placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none"
-      />
-      {showMenu && (
-        <div className="absolute z-20 mt-1 max-h-64 w-72 overflow-auto rounded border border-slate-700 bg-slate-950 shadow-lg">
-          {searching && results.length === 0 ? (
-            <div className="px-2 py-1.5 text-slate-500">Searching…</div>
-          ) : results.length === 0 ? (
-            <div className="px-2 py-1.5 text-slate-500">No teams found</div>
-          ) : (
-            results.map((t) => (
-              <button
-                key={t.teamId}
-                type="button"
-                // onMouseDown + preventDefault so the pick lands before the input's
-                // blur can tear the menu down (the classic combobox click-vs-blur race).
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  onPick({ id: t.teamId, name: t.teamName });
-                  setQ(t.teamName); // show the picked team in the box, not an empty field
-                  setOpen(false);
-                }}
-                className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left hover:bg-slate-800"
-              >
-                <span className="min-w-0 truncate text-slate-200">{t.teamName}</span>
-                <span className="shrink-0 text-[10px] text-slate-500">
-                  {t.wins != null && t.losses != null ? `${t.wins}-${t.losses}` : ''}
-                  {t.teamLevel != null ? ` · L${t.teamLevel}` : ''}
-                </span>
-              </button>
-            ))
-          )}
-        </div>
-      )}
-    </div>
-  );
-}

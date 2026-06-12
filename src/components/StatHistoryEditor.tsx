@@ -130,11 +130,11 @@ export function StatHistoryEditor({ player, snapshots, onClose, onUpdate, onDele
           </div>
 
           {/* Stat grid */}
-          <div className="grid grid-cols-7 gap-1.5">
+          <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-7">
             {SIM_KEYS.map((k) => {
               const diff = prev ? displaySim[k] - prev.sim[k] : null;
               return (
-                <div key={k} className="flex flex-col items-center">
+                <div key={k} className="flex min-w-0 flex-col items-center">
                   <span className="text-[10px] uppercase tracking-wider text-slate-500">
                     {SIM_LABELS[k]}
                   </span>
