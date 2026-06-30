@@ -361,16 +361,26 @@ function applyGameContext(rows: { gameId: string; position: number | null; metri
 }
 
 function aggregate(rows: { playerId: string; playerName: string; position: number | null; metrics: PlayerGameMetrics }[]): AggregatedPlayer[] {
-  const acc = new Map<string, { name: string; games: number; sum: Sums; maxEV: number; armMax: number; byPos: Map<number, { games: number; sum: Sums }> }>();
+  type TStat = { acts: number; effects: number; stacked: number; maxTier: number };
+  const acc = new Map<string, { name: string; games: number; sum: Sums; maxEV: number; armMax: number; byPos: Map<number, { games: number; sum: Sums }>; talents: Map<string, TStat> }>();
   for (const r of rows) {
     const m = r.metrics;
     let a = acc.get(r.playerId);
     if (!a) {
-      a = { name: r.playerName, games: 0, sum: zeroSums(), maxEV: 0, armMax: 0, byPos: new Map() };
+      a = { name: r.playerName, games: 0, sum: zeroSums(), maxEV: 0, armMax: 0, byPos: new Map(), talents: new Map() };
       acc.set(r.playerId, a);
     }
     a.games++;
     for (const k of NUMERIC_KEYS) a.sum[k] += (m[k] as number) ?? 0;
+    // Accumulate per-talent triggering + stacking across games.
+    if (m.talentActs) {
+      for (const [nm, v] of Object.entries(m.talentActs)) {
+        const e = a.talents.get(nm) ?? { acts: 0, effects: 0, stacked: 0, maxTier: 0 };
+        e.acts += v.acts ?? 0; e.effects += v.effects ?? 0; e.stacked += v.stacked ?? 0;
+        e.maxTier = Math.max(e.maxTier, v.maxTier ?? 0);
+        a.talents.set(nm, e);
+      }
+    }
     a.maxEV = Math.max(a.maxEV, m.evMax ?? 0);
     a.armMax = Math.max(a.armMax, m.throwSpeedMax ?? 0);
     // Per-position split: only count a game toward a position if the player
@@ -426,6 +436,9 @@ function aggregate(rows: { playerId: string; playerName: string; position: numbe
       caughtStealing: s.caughtStealing,
       csRate: s.stealAttempts > 0 ? Math.round((s.caughtStealing / s.stealAttempts) * 1000) / 1000 : null,
       dp: s.dpInvolved, dpStarted: s.dpStarted, dpTurned: s.dpTurned, dpFinished: s.dpFinished, dpOpp: s.dpOpp,
+      talents: [...a.talents.entries()]
+        .map(([name, v]) => ({ name, acts: v.acts, effects: v.effects, stacked: v.stacked, maxTier: v.maxTier, perGame: a.games > 0 ? Math.round((v.acts / a.games) * 10) / 10 : 0 }))
+        .sort((x, y) => y.acts - x.acts),
       byPosition,
     });
   }

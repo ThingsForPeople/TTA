@@ -84,6 +84,24 @@ export interface TalentActivation {
   count: number;
 }
 
+// Per-player talent triggering for one game. `count` = times it triggered
+// (talent.activated). `effects` = effect.applied count (effects/count > 1 means
+// the talent applies multiple effects per trigger — the closest signal to
+// compounding the log exposes). NOTE: `maxTier` is the talent's static LEVEL
+// (effect.applied `tier` is constant per player = roster level), NOT an in-game
+// stack/charge depth — the replay does not record per-game stacking. `stacked`
+// is vestigial (kept for storage shape). Lets us show "Waste No Time fired ×16".
+export interface PlayerTalentLine {
+  playerId: string;
+  name: string;
+  talentId: string;
+  displayName: string;
+  count: number;
+  effects: number;
+  stacked: number;
+  maxTier: number;
+}
+
 export interface FieldingLine {
   playerId: string;
   name: string;
@@ -112,6 +130,7 @@ export interface ReplayEvaluation {
   them: TeamEval;
   ourPitcher: PitcherEval | null;
   talentActivations: TalentActivation[]; // our team, most-active first
+  talentBreakdown: PlayerTalentLine[]; // per-player triggering + stacking (our team)
   hardHitThreshold: number | null; // EV cutoff used for "hard-hit"
   fielding?: FieldingLine[]; // our team's per-player fielding for this game
   notes: string[];
@@ -278,6 +297,14 @@ export function evaluateReplay(raw: any, ourTeamId?: string): ReplayEvaluation {
   const pas: PlateAppearance[] = [];
   const pitchers = new Map<string, PitcherEval & { _types: Map<string, PitchTypeStat> }>();
   const talentCounts = new Map<string, number>();
+  // Per (ownerId|talentId) triggering + stacking, our side, for the per-player breakdown.
+  const talentStats = new Map<string, { playerId: string; talentId: string; acts: number; effects: number; stacked: number; maxTier: number }>();
+  const tStat = (ownerId: string, talentId: string) => {
+    const k = ownerId + '|' + talentId;
+    let s = talentStats.get(k);
+    if (!s) { s = { playerId: ownerId, talentId, acts: 0, effects: 0, stacked: 0, maxTier: 0 }; talentStats.set(k, s); }
+    return s;
+  };
   // batting discipline per side
   const disc: Record<'home' | 'away', { pitchesSeen: number; swings: number; whiffs: number; chases: number }> = {
     home: { pitchesSeen: 0, swings: 0, whiffs: 0, chases: 0 },
@@ -390,6 +417,18 @@ export function evaluateReplay(raw: any, ourTeamId?: string): ReplayEvaluation {
           const op = pl.ownerId ? playerById.get(pl.ownerId) : undefined;
           if (op && op.side === ourSide && pl.talentId) {
             talentCounts.set(pl.talentId, (talentCounts.get(pl.talentId) ?? 0) + 1);
+            tStat(pl.ownerId, pl.talentId).acts++;
+          }
+          break;
+        }
+        case 'effect.applied': {
+          // `tier` is the talent's LEVEL (static per player), not an in-game stack.
+          const op = pl.ownerId ? playerById.get(pl.ownerId) : undefined;
+          if (op && op.side === ourSide && pl.talentId && typeof pl.tier === 'number') {
+            const s = tStat(pl.ownerId, pl.talentId);
+            s.effects++;
+            if (pl.tier >= 2) s.stacked++;
+            if (pl.tier > s.maxTier) s.maxTier = pl.tier;
           }
           break;
         }
@@ -488,9 +527,25 @@ export function evaluateReplay(raw: any, ourTeamId?: string): ReplayEvaluation {
     .map(([talentId, count]) => ({ talentId, displayName: talentNames.get(talentId) ?? talentId, count }))
     .sort((a, b) => b.count - a.count);
 
+  // Per-player breakdown, excluding pitch-arsenal ids (they fire every pitch and
+  // aren't the "talents" managers reason about) — keep batting/fielding/zone.
+  const talentBreakdown: PlayerTalentLine[] = [...talentStats.values()]
+    .filter((s) => !PITCH_TYPE_IDS.has(s.talentId) && !isPitchSubId(s.talentId) && (s.acts > 0 || s.effects > 0))
+    .map((s) => ({
+      playerId: s.playerId,
+      name: playerById.get(s.playerId)?.name ?? s.playerId,
+      talentId: s.talentId,
+      displayName: talentNames.get(s.talentId) ?? s.talentId,
+      count: s.acts,
+      effects: s.effects,
+      stacked: s.stacked,
+      maxTier: s.maxTier,
+    }))
+    .sort((a, b) => b.count - a.count || b.effects - a.effects);
+
   const notes = buildNotes(us, them, ourPitcher, hardHitThreshold);
 
-  return { ourSide, matched, us, them, ourPitcher, talentActivations, hardHitThreshold, notes };
+  return { ourSide, matched, us, them, ourPitcher, talentActivations, talentBreakdown, hardHitThreshold, notes };
 }
 
 // ── Per-player metrics extraction (for the advanced-stats sync) ──────────
@@ -584,6 +639,11 @@ export interface PlayerGameMetrics {
   // not from where a fielder caught it). Team-level, so stored ONLY on our
   // pitcher's row to avoid duplication. `o` = we recorded the out (vs a hit).
   oppSpray?: { x: number; y: number; o: boolean }[];
+  // Per-talent triggering this game (batting/fielding/zone only — pitch arsenal
+  // excluded). Keyed by displayName. acts = triggers; effects = effect.applied
+  // count (effects/acts > 1 ⇒ multiple effects per trigger); maxTier = talent
+  // LEVEL (static, not stacking). Aggregated for the cross-game talent overview.
+  talentActs?: Record<string, { acts: number; effects: number; stacked: number; maxTier: number }>;
 }
 
 // Batted-ball spray geometry. `horizontalAngle` is a bearing where ≈ −90° is
@@ -712,6 +772,11 @@ export interface AggregatedPlayer {
   stealAttempts: number; caughtStealing: number; csRate: number | null;
   // double-play participation (descriptive), summed across games
   dp: number; dpStarted: number; dpTurned: number; dpFinished: number; dpOpp: number;
+  // cross-game talent triggering (batting/fielding/zone; pitch arsenal excluded).
+  // acts = total triggers; effects = effect applications (effects/acts > 1 ⇒
+  // multiple effects per trigger); maxTier = talent LEVEL (not a stack); perGame
+  // = acts/games. Empty until games are (re-)synced with talent data.
+  talents: { name: string; acts: number; effects: number; stacked: number; maxTier: number; perGame: number }[];
   // per-position fielding splits (best-position breakdown), most-played first
   byPosition: PlayerPositionSplit[];
 }
@@ -792,13 +857,25 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
   const away = game.away ?? {};
 
   const playerById = new Map<string, { name: string; side: 'home' | 'away'; position: number | null; coord?: { x: number; y: number } }>();
+  const talentNames = new Map<string, string>(); // talentId -> displayName
   for (const side of ['home', 'away'] as const) {
     const t = side === 'home' ? home : away;
     for (const p of t.players ?? []) {
       const name = `${p.firstName ?? ''} ${p.lastName ?? ''}`.trim() || p.id;
       playerById.set(p.id, { name, side, position: typeof p.position === 'number' ? p.position : null, coord: p.coordinates });
+      for (const tal of p.talents ?? []) if (tal?.id) talentNames.set(tal.id, tal.displayName ?? tal.id);
     }
   }
+  // Record a talent trigger / effect for one of our players (pitch arsenal excluded).
+  const noteTalent = (ownerId: string, talentId: string, kind: 'act' | 'effect', tier = 0) => {
+    if (!isOurs(ownerId) || PITCH_TYPE_IDS.has(talentId) || isPitchSubId(talentId)) return;
+    const r = row(ownerId);
+    const name = talentNames.get(talentId) ?? talentId;
+    const acc = (r.talentActs ??= {});
+    const e = (acc[name] ??= { acts: 0, effects: 0, stacked: 0, maxTier: 0 });
+    if (kind === 'act') e.acts++;
+    else { e.effects++; if (tier >= 2) e.stacked++; if (tier > e.maxTier) e.maxTier = tier; }
+  };
 
   const matched = ourTeamId === home.id || ourTeamId === away.id;
   const ourSide: 'home' | 'away' = away.id === ourTeamId ? 'away' : 'home';
@@ -910,6 +987,14 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
     for (const ev of seg.events ?? []) {
       const pl = ev.payload ?? {};
       switch (ev.type) {
+        case 'talent.activated': {
+          if (pl.ownerId && pl.talentId) noteTalent(pl.ownerId, pl.talentId, 'act');
+          break;
+        }
+        case 'effect.applied': {
+          if (pl.ownerId && pl.talentId && typeof pl.tier === 'number') noteTalent(pl.ownerId, pl.talentId, 'effect', pl.tier);
+          break;
+        }
         case 'batter.action': {
           if (pl.action === 'swing' && batterId && batterSide === ourSide) {
             const r = row(batterId);

@@ -74,17 +74,32 @@ export function ReplayAnalysis({ teamUuid, gameId }: Props) {
       {/* Our pitching */}
       {data.ourPitcher && <PitchingTable pitcher={data.ourPitcher} />}
 
-      {/* Talent activations */}
-      {data.talentActivations.length > 0 && (
+      {/* Talent triggering + compounding, per player */}
+      {data.talentBreakdown.length > 0 && (
         <div>
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
-            Talents fired (our team)
+            Talents fired (our team) — ×triggers this game; <span className="text-amber-300/80">Lv</span> = talent level
           </h3>
-          <div className="flex flex-wrap gap-1.5">
-            {data.talentActivations.map((t) => (
-              <span key={t.talentId} className="rounded bg-purple-500/15 px-2 py-0.5 text-xs text-purple-200">
-                {t.displayName} <span className="font-mono text-purple-300/70">×{t.count}</span>
-              </span>
+          <div className="space-y-1.5">
+            {Array.from(
+              data.talentBreakdown.reduce((m, t) => {
+                (m.get(t.playerId) ?? m.set(t.playerId, []).get(t.playerId)!).push(t);
+                return m;
+              }, new Map<string, typeof data.talentBreakdown>()).values(),
+            ).map((lines) => (
+              <div key={lines[0].playerId} className="flex flex-wrap items-baseline gap-1.5">
+                <span className="mr-1 text-xs text-slate-400">{lines[0].name}:</span>
+                {lines.map((t) => (
+                  <span
+                    key={t.talentId}
+                    className="rounded bg-purple-500/15 px-2 py-0.5 text-xs text-purple-200"
+                    title={`${t.count} trigger${t.count === 1 ? '' : 's'} this game` + (t.effects && t.count ? ` · ${(t.effects / t.count).toFixed(1)} effect(s) applied per trigger` : '') + (t.maxTier > 1 ? ` · talent level ${t.maxTier}` : '')}
+                  >
+                    {t.displayName} <span className="font-mono text-purple-300/70">×{t.count}</span>
+                    {t.maxTier > 1 && <span className="ml-1 font-mono text-amber-300/80">Lv{t.maxTier}</span>}
+                  </span>
+                ))}
+              </div>
             ))}
           </div>
         </div>

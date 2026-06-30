@@ -28,8 +28,8 @@ function effImp(pi: PositionImportance): number {
   return DEFAULT_POSITION_IMPORTANCE[pi.position] ?? 1;
 }
 
-type View = 'fielding' | 'positions' | 'alignment' | 'heatmap';
-const VIEW_LABEL: Record<View, string> = { fielding: 'fielding', positions: 'by position', alignment: 'best alignment', heatmap: 'heat map' };
+type View = 'fielding' | 'positions' | 'alignment' | 'heatmap' | 'talents';
+const VIEW_LABEL: Record<View, string> = { fielding: 'fielding', positions: 'by position', alignment: 'best alignment', heatmap: 'heat map', talents: 'talents' };
 
 // Fielded-ball heat bin (mirrors the route's HeatBin). x,y are integer field
 // coords (origin = home plate, +x = RF side, −y = deeper).
@@ -501,6 +501,62 @@ function HeatMaps({ heatBins, sprayBins }: { heatBins: HeatBin[]; sprayBins: Spr
   );
 }
 
+// Cross-game talent triggering + compounding, per player. "Fires/g" = how often
+// the talent triggers per game; "Peak"/"Stack%" = how often/how high it stacks
+// (effect.applied tier). Answers "how often does Waste No Time stack for him?".
+function TalentView({ players }: { players: AggregatedPlayer[] }) {
+  const totalActs = (p: AggregatedPlayer) => (p.talents ?? []).reduce((s, t) => s + t.acts, 0);
+  const rows = players.filter((p) => (p.talents?.length ?? 0) > 0).sort((a, b) => totalActs(b) - totalActs(a));
+  if (rows.length === 0) {
+    return (
+      <p className="text-sm text-slate-400">
+        No talent data yet — run <span className="text-emerald-300">Clear &amp; re-sync</span> to capture talent triggering + stacking from replays.
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-4">
+      {rows.map((p) => (
+        <div key={p.playerId}>
+          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">
+            {p.name} <span className="text-slate-600">({p.games}g)</span>
+          </h4>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-slate-800 text-[10px] uppercase tracking-wider text-slate-500">
+                  <th className="px-2 py-1 text-left">Talent</th>
+                  <th className="px-1.5 py-1 text-right" title="Average times this talent triggered per game">Fires/g</th>
+                  <th className="px-1.5 py-1 text-right" title="Total triggers across all games in view">Total</th>
+                  <th className="px-1.5 py-1 text-right" title="Effects applied per trigger. >1 means the talent applies multiple effects each time it fires (the closest thing to compounding the replay exposes).">Eff/trig</th>
+                  <th className="px-1.5 py-1 text-right" title="Talent level (from the roster). NOT an in-game stack — the replay does not expose per-game charge/stack depth.">Lvl</th>
+                </tr>
+              </thead>
+              <tbody>
+                {p.talents.map((t) => {
+                  const perTrig = t.acts > 0 ? t.effects / t.acts : 0;
+                  return (
+                    <tr key={t.name} className="border-b border-slate-800/60 text-slate-300 last:border-0">
+                      <td className="px-2 py-1 whitespace-nowrap">{t.name}</td>
+                      <td className="px-1.5 py-1 text-right font-mono">{t.perGame.toFixed(1)}</td>
+                      <td className="px-1.5 py-1 text-right font-mono text-slate-500">{t.acts}</td>
+                      <td className={'px-1.5 py-1 text-right font-mono ' + (perTrig > 1.05 ? 'text-amber-300/80' : 'text-slate-600')}>{t.effects > 0 ? '×' + perTrig.toFixed(1) : '·'}</td>
+                      <td className="px-1.5 py-1 text-right font-mono text-slate-500">{t.maxTier > 0 ? t.maxTier : '·'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
+      <p className="text-[10px] text-slate-600">
+        <strong>Fires/g</strong> = how often the talent triggers per game. <strong>Eff/trig</strong> = effects applied per trigger (&gt;1 = it applies multiple effects at once — the closest signal to compounding the replay exposes). <strong>Lvl</strong> = the talent’s level, not an in-game stack: the replay does <em>not</em> record per-game charge/stack depth, so true in-game stacking isn’t directly visible. Pitch arsenal excluded; re-sync to refresh.
+      </p>
+    </div>
+  );
+}
+
 export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
   const [players, setPlayers] = useState<AggregatedPlayer[]>([]);
   const [posImp, setPosImp] = useState<PositionImportance[]>([]);
@@ -737,7 +793,7 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
           {/* Controls */}
           <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
             <div className="flex rounded border border-slate-700">
-              {(['fielding', 'positions', 'alignment', 'heatmap'] as const).map((v) => (
+              {(['fielding', 'positions', 'alignment', 'heatmap', 'talents'] as const).map((v) => (
                 <button
                   key={v}
                   type="button"
@@ -890,6 +946,8 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
             <BestAlignment players={players} posImp={posImp} />
           ) : view === 'heatmap' ? (
             <HeatMaps heatBins={heatBins} sprayBins={sprayBins} />
+          ) : view === 'talents' ? (
+            <TalentView players={players} />
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-xs">
