@@ -313,6 +313,7 @@ const FIELDING_COLS: Column[] = [
   { key: 'releaseAvg', label: 'Rel', title: 'Avg release time (lower = quicker)', get: (p) => p.releaseAvg, fmt: (v) => (v == null ? '·' : v.toFixed(2)) },
   { key: 'closePlays', label: 'Tough', title: 'Difficult plays converted', get: (p) => p.closePlays, fmt: int },
   { key: 'dp', label: 'DP', title: 'Double plays turned (any role: started / pivoted / finished), summed across games', get: (p) => p.dp, fmt: int },
+  { key: 'dpOpp', label: 'DPo', title: 'DP opportunities — infield grounders fielded with a runner on 1st and < 2 outs. DP ÷ DPo ≈ turn rate (small per-player samples — read loosely).', get: (p) => p.dpOpp, fmt: int },
   { key: 'caughtStealing', label: 'CS', title: 'Runners caught stealing (catcher) — attempts & rate shown in insights', get: (p) => p.caughtStealing, fmt: int },
   { key: 'basesSaved', label: 'BsSv', title: 'Bases saved (outfield) — extra-base suppression: bases held below the ball’s expected total over balls the OF retrieved (ground balls already through for a hit). Positive = held hits short. The OF value PAE can’t see; re-sync to populate.', get: (p) => p.basesSaved, fmt: signed1 },
 ];

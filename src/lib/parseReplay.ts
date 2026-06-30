@@ -567,6 +567,10 @@ export interface PlayerGameMetrics {
   dpStarted: number; // fielded the ball that began the DP (the feed)
   dpTurned: number; // recorded an out then relayed onward (the pivot)
   dpFinished: number; // recorded the final out of the DP
+  // DP opportunities (denominator for DP-turn rate): an infield grounder fielded
+  // by this player with a runner on 1st and < 2 outs. dpStarted/dpOpp = how often
+  // a real DP chance was converted into a started DP.
+  dpOpp: number;
   // Raw per-engaged-chance records: distance covered (`d`) + whether it was an
   // out (`o`), plus the integer field coordinates of the engagement (`x`,`y`,
   // quantized — origin = home plate, +x = RF side, −y = deeper). `d`/`o` let the
@@ -673,6 +677,7 @@ export interface PlayerPositionSplit {
   stealAttempts: number;
   caughtStealing: number;
   dp: number; // double plays involved in at this position
+  dpOpp: number; // DP opportunities (IF grounder, R1, <2 outs) at this position
   // OF extra-base suppression at this position (bases held below expected).
   basesSaved: number;
   basesSavedOpps: number;
@@ -706,7 +711,7 @@ export interface AggregatedPlayer {
   // catcher steal defense
   stealAttempts: number; caughtStealing: number; csRate: number | null;
   // double-play participation (descriptive), summed across games
-  dp: number; dpStarted: number; dpTurned: number; dpFinished: number;
+  dp: number; dpStarted: number; dpTurned: number; dpFinished: number; dpOpp: number;
   // per-position fielding splits (best-position breakdown), most-played first
   byPosition: PlayerPositionSplit[];
 }
@@ -740,7 +745,7 @@ function emptyMetrics(playerId: string, name: string, position: number | null): 
     rangeSum: 0, rangeCount: 0,
     throwSpeedSum: 0, throwSpeedCount: 0, throwSpeedMax: 0, releaseSum: 0, releaseCount: 0,
     expectedOuts: 0, engagedOuts: 0, leverageSum: 0, basesSavedSum: 0, basesSavedOpps: 0, stealAttempts: 0, caughtStealing: 0,
-    dpInvolved: 0, dpStarted: 0, dpTurned: 0, dpFinished: 0,
+    dpInvolved: 0, dpStarted: 0, dpTurned: 0, dpFinished: 0, dpOpp: 0,
     engageDists: [],
   };
 }
@@ -778,6 +783,7 @@ export function curveOut(c: { a: number; d50: number }, distance: number): numbe
 
 const MOUND_BASE = 5; // fielder.throw targetBase used for returns to the pitcher
 const OUTFIELD = new Set([7, 8, 9]); // LF/CF/RF scorekeeping numbers
+const DP_STARTER = new Set([1, 3, 4, 5, 6]); // P/1B/2B/3B/SS — can start a double play
 const RESULT_BASES: Record<string, number> = { single: 1, double: 2, triple: 3, homerun: 4 };
 
 export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics {
@@ -821,6 +827,8 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
   };
 
   let curAB: number | undefined;
+  let abR1 = false; // runner on 1st at the start of the current at-bat
+  let abOuts = 0; // outs at the start of the current at-bat (for DP opportunities)
   let lastContact: { ev?: number; la?: number } | undefined;
   let throwBuf: { throwerId: string; targetOut: string | null; base: number }[] = [];
   // Per-at-bat fielding state for the range-calibrated expected-outs metric.
@@ -873,6 +881,11 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
     if (abId != null && abId !== curAB) {
       flushFielding();
       curAB = abId;
+      // Capture the base-out state entering this at-bat (first segment's
+      // gameState is pre-PA) for DP-opportunity detection.
+      const gs0 = seg.gameState;
+      abR1 = !!gs0?.runners?.[0];
+      abOuts = typeof gs0?.outs === 'number' ? gs0.outs : 0;
       lastContact = undefined;
       lastOppContact = undefined;
       throwBuf = [];
@@ -980,6 +993,8 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
             }
             const r = row(pl.fielderId);
             r.chances++;
+            // DP opportunity: an infield grounder fielded with R1 and < 2 outs.
+            if (pl.catchType === 'ground' && DP_STARTER.has(info?.position ?? 0) && abR1 && abOuts < 2) r.dpOpp++;
             const start = info?.coord;
             const cp = pl.catchPoint;
             if (start && cp && typeof cp.x === 'number' && typeof cp.y === 'number') {

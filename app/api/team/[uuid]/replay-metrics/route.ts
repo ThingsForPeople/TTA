@@ -257,6 +257,7 @@ function buildSplits(byPos: Map<number, { games: number; sum: Sums }>): PlayerPo
       stealAttempts: s.stealAttempts,
       caughtStealing: s.caughtStealing,
       dp: s.dpInvolved,
+      dpOpp: s.dpOpp,
       basesSaved: Math.round(s.basesSavedSum * 100) / 100,
       basesSavedOpps: s.basesSavedOpps,
     });
@@ -424,7 +425,7 @@ function aggregate(rows: { playerId: string; playerName: string; position: numbe
       stealAttempts: s.stealAttempts,
       caughtStealing: s.caughtStealing,
       csRate: s.stealAttempts > 0 ? Math.round((s.caughtStealing / s.stealAttempts) * 1000) / 1000 : null,
-      dp: s.dpInvolved, dpStarted: s.dpStarted, dpTurned: s.dpTurned, dpFinished: s.dpFinished,
+      dp: s.dpInvolved, dpStarted: s.dpStarted, dpTurned: s.dpTurned, dpFinished: s.dpFinished, dpOpp: s.dpOpp,
       byPosition,
     });
   }
@@ -439,7 +440,7 @@ const NUMERIC_KEYS: (keyof PlayerGameMetrics)[] = [
   'putouts', 'assists', 'fieldErrors', 'chances', 'closePlays',
   'rangeSum', 'rangeCount', 'throwSpeedSum', 'throwSpeedCount', 'releaseSum', 'releaseCount',
   'expectedOuts', 'engagedOuts', 'leverageSum', 'basesSavedSum', 'basesSavedOpps', 'stealAttempts', 'caughtStealing',
-  'dpInvolved', 'dpStarted', 'dpTurned', 'dpFinished',
+  'dpInvolved', 'dpStarted', 'dpTurned', 'dpFinished', 'dpOpp',
 ];
 
 // GET — aggregated advanced stats across stored replay metrics.
