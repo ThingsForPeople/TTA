@@ -10,6 +10,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import type { PitchTalent } from './playerMeta';
+import { expectedBases, expectedWobaCon } from './expectedOutcome';
 
 export interface BbMix {
   ground: number;
@@ -514,6 +515,10 @@ export interface PlayerGameMetrics {
   evCount: number;
   evMax: number;
   sweetSpot: number; // launch angle 8–32° (threshold-free "good contact")
+  // Σ expected wOBA-on-contact (from EV×launch-angle, see expectedOutcome.ts)
+  // over balls in play. /bip = xwOBAcon — the hitter's deserved contact quality,
+  // stripped of defense/luck. Compare to actual wOBAcon for a luck read.
+  xwobaConSum: number;
   ground: number;
   line: number;
   fly: number;
@@ -542,6 +547,13 @@ export interface PlayerGameMetrics {
   // Σ P(1−P) over engagements — "skill leverage": how many outs are genuinely
   // in doubt (vs routine/hopeless) at this position. Drives position importance.
   leverageSum: number;
+  // Bases-saved (OF extra-base suppression): on balls an outfielder RETRIEVES —
+  // ground balls that already landed for a hit, which are NOT out chances and are
+  // EXCLUDED from chances/PAE/leverage above — the bases prevented vs the
+  // trajectory's expected bases (expectedOutcome.ts). Positive = held the hit
+  // shorter than a typical fielder would. The OF value axis PAE can't see.
+  basesSavedSum: number;
+  basesSavedOpps: number;
   // catcher steal defense (opponent steal attempts faced + how many were caught)
   stealAttempts: number;
   caughtStealing: number;
@@ -661,6 +673,9 @@ export interface PlayerPositionSplit {
   stealAttempts: number;
   caughtStealing: number;
   dp: number; // double plays involved in at this position
+  // OF extra-base suppression at this position (bases held below expected).
+  basesSaved: number;
+  basesSavedOpps: number;
 }
 
 // Per-player aggregate across multiple games (derived rates), returned by the
@@ -674,6 +689,9 @@ export interface AggregatedPlayer {
   pa: number; ab: number; hits: number; hr: number; k: number; bb: number; bip: number;
   avg: number; obp: number; kRate: number; bbRate: number;
   avgEV: number | null; maxEV: number | null; sweetSpotRate: number | null;
+  // expected wOBA-on-contact (trajectory-based "deserved" production) vs the
+  // actual wOBA-on-contact; their gap is a luck/defense read.
+  xwobaCon: number | null; wobaCon: number | null;
   bbMix: { ground: number; line: number; fly: number; popup: number };
   swings: number; whiffs: number; chases: number; whiffRate: number | null;
   // fielding
@@ -682,6 +700,9 @@ export interface AggregatedPlayer {
   rangeAvg: number | null; armAvg: number | null; armMax: number | null; releaseAvg: number | null;
   // range-calibrated plays above expected (engagedOuts − expectedOuts)
   pae: number; expectedOuts: number;
+  // OF extra-base suppression (bases held below expected) — the value axis PAE
+  // can't see; total, per-game, and the opportunity count it's based on.
+  basesSaved: number | null; basesSavedPerGame: number | null; basesSavedOpps: number;
   // catcher steal defense
   stealAttempts: number; caughtStealing: number; csRate: number | null;
   // double-play participation (descriptive), summed across games
@@ -713,12 +734,12 @@ function emptyMetrics(playerId: string, name: string, position: number | null): 
   return {
     playerId, name, position,
     pa: 0, ab: 0, hits: 0, doubles: 0, triples: 0, hr: 0, k: 0, bb: 0, bip: 0,
-    evSum: 0, evCount: 0, evMax: 0, sweetSpot: 0, ground: 0, line: 0, fly: 0, popup: 0,
+    evSum: 0, evCount: 0, evMax: 0, sweetSpot: 0, xwobaConSum: 0, ground: 0, line: 0, fly: 0, popup: 0,
     swings: 0, whiffs: 0, chases: 0, pitchesSeen: 0,
     putouts: 0, assists: 0, fieldErrors: 0, chances: 0, closePlays: 0,
     rangeSum: 0, rangeCount: 0,
     throwSpeedSum: 0, throwSpeedCount: 0, throwSpeedMax: 0, releaseSum: 0, releaseCount: 0,
-    expectedOuts: 0, engagedOuts: 0, leverageSum: 0, stealAttempts: 0, caughtStealing: 0,
+    expectedOuts: 0, engagedOuts: 0, leverageSum: 0, basesSavedSum: 0, basesSavedOpps: 0, stealAttempts: 0, caughtStealing: 0,
     dpInvolved: 0, dpStarted: 0, dpTurned: 0, dpFinished: 0,
     engageDists: [],
   };
@@ -756,6 +777,8 @@ export function curveOut(c: { a: number; d50: number }, distance: number): numbe
 }
 
 const MOUND_BASE = 5; // fielder.throw targetBase used for returns to the pitcher
+const OUTFIELD = new Set([7, 8, 9]); // LF/CF/RF scorekeeping numbers
+const RESULT_BASES: Record<string, number> = { single: 1, double: 2, triple: 3, homerun: 4 };
 
 export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics {
   const game = raw?.game ?? {};
@@ -802,6 +825,10 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
   let throwBuf: { throwerId: string; targetOut: string | null; base: number }[] = [];
   // Per-at-bat fielding state for the range-calibrated expected-outs metric.
   const engageBuf = new Map<string, { dist: number; pos: number | null; x?: number; y?: number }>();
+  // Outfield ground-ball RETRIEVALS this at-bat — balls that already landed for a
+  // hit (0% out potential), so they're NOT out chances. Credited to bases-saved
+  // (extra-base suppression) when the at-bat's result lands. See dead-touch notes.
+  const retrievalBuf: { fid: string; ev?: number; la?: number }[] = [];
   const outCredit = new Set<string>(); // fielders who recorded a PO/A this at-bat
   const stealRunners = new Set<string>(); // opponent runners who attempted a steal
   const outRunners = new Set<string>(); // runners retired this at-bat
@@ -831,6 +858,7 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
       }
     }
     engageBuf.clear();
+    retrievalBuf.length = 0;
     outCredit.clear();
     stealRunners.clear();
     outRunners.clear();
@@ -914,6 +942,7 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
               if (typeof lastContact.la === 'number') {
                 r[bbBucket(lastContact.la)]++;
                 if (lastContact.la >= 8 && lastContact.la <= 32) r.sweetSpot++;
+                r.xwobaConSum += expectedWobaCon(lastContact.ev, lastContact.la);
               }
             }
           }
@@ -921,6 +950,18 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
           if (batterSide && batterSide !== ourSide && lastOppContact) {
             const pt = sprayPoint(lastOppContact.ha, lastOppContact.depth);
             if (pt) oppSpray.push({ x: pt.x, y: pt.y, o: !HIT_RESULTS.has(pl.result ?? '') });
+          }
+          // Bases-saved: credit each OF retrieval for holding the hit below its
+          // trajectory's expected bases (positive = suppressed extra bases).
+          if (batterSide && batterSide !== ourSide && retrievalBuf.length) {
+            const actualBases = RESULT_BASES[pl.result ?? ''] ?? 0;
+            for (const rt of retrievalBuf) {
+              if (typeof rt.ev !== 'number' || typeof rt.la !== 'number') continue;
+              const r = row(rt.fid);
+              r.basesSavedSum += expectedBases(rt.ev, rt.la) - actualBases;
+              r.basesSavedOpps++;
+            }
+            retrievalBuf.length = 0;
           }
           lastContact = undefined;
           lastOppContact = undefined;
@@ -930,6 +971,13 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
           if (skipFoulFetch) break; // dead foul-ball retrieval, not a real chance
           if (isOurs(pl.fielderId) && (pl.catchType === 'ground' || pl.catchType === 'fly')) {
             const info = playerById.get(pl.fielderId);
+            // Outfield ground ball = a hit already on the ground being retrieved,
+            // not an out chance (replay: ~0% become outs). Route to bases-saved
+            // instead of polluting chances/PAE/range with a non-opportunity.
+            if (info && OUTFIELD.has(info.position ?? 0) && pl.catchType === 'ground') {
+              retrievalBuf.push({ fid: pl.fielderId, ev: lastContact?.ev, la: lastContact?.la });
+              break;
+            }
             const r = row(pl.fielderId);
             r.chances++;
             const start = info?.coord;
@@ -948,8 +996,14 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
           if (isOurs(pl.fielderId)) {
             const info = playerById.get(pl.fielderId);
             const r = row(pl.fielderId);
+            r.fieldErrors++; // every miss is an error (reconciles with the box score)
+            // A muffed outfield grounder is still a retrieval (the ball was a hit),
+            // not a missed out chance — keep it out of chances/PAE.
+            if (info && OUTFIELD.has(info.position ?? 0) && pl.isGroundBall === true) {
+              retrievalBuf.push({ fid: pl.fielderId, ev: lastContact?.ev, la: lastContact?.la });
+              break;
+            }
             r.chances++;
-            r.fieldErrors++;
             const start = info?.coord;
             const cp = pl.catchPoint;
             if (start && cp && typeof cp.x === 'number' && typeof cp.y === 'number') {
@@ -1120,9 +1174,12 @@ export function collectFieldingChances(raw: any, ourTeamId?: string): FieldingCh
       if ((ev.type === 'fielder.catch' && !skipFoulFetch && isOurs(pl.fielderId) && (pl.catchType === 'ground' || pl.catchType === 'fly'))
         || (ev.type === 'fielder.miss' && !skipFoulFetch && isOurs(pl.fielderId))) {
         const info = playerById.get(pl.fielderId);
+        // Match extractPlayerMetrics: outfield ground balls are retrievals, not
+        // out chances — exclude so the fitted curve sees only real opportunities.
+        const isOFGround = OUTFIELD.has(info?.position ?? 0) && (pl.catchType === 'ground' || pl.isGroundBall === true);
         const start = info?.coord;
         const cp = pl.catchPoint;
-        if (start && cp && typeof cp.x === 'number' && typeof cp.y === 'number') {
+        if (!isOFGround && start && cp && typeof cp.x === 'number' && typeof cp.y === 'number') {
           engageBuf.set(pl.fielderId, { dist: Math.hypot(cp.x - start.x, cp.y - start.y), pos: info?.position ?? null });
         }
       } else if (ev.type === 'fielder.throw') {

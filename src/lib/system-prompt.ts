@@ -64,7 +64,7 @@ const GAME_RULES = `## Sim stats
 Each player has 7 stats (0–100):
 - CON (Contact): Contact chance + swing chance + hit quality (higher CON → more line drives)
 - POW (Power): Exit velocity + gap influence (higher POW → more balls in gaps)
-- SPD (Speed): Fielding speed + running speed
+- SPD (Speed): Fielding range + running speed. OFFENSIVELY it's baserunning ONLY — replay data shows SPD has ~0 effect on contact/on-base (AVG/OBP), so do not credit it for hitting ability. (CON drives contact/on-base; POW drives power/EV.)
 - FLD (Fielding): Fielding chance + throw exchange speed
 - ARM (Arm): Fielder and pitching throw speed
 - PIT (Pitching): Pitching accuracy and movement (pitchers only)
@@ -76,15 +76,15 @@ ${buildEngineLevers()}
 - A talent's engine effect is its PAYOFF and can differ from its TRIGGER (e.g. "Pressure Cooker" pays off as line drives + power, but only after building charges on outs with runners on — so it's still a runners-on, middle-of-order talent).
 
 ## Positions & defensive fit
-Position scoring is based on weighted sim stats. Defense-critical positions are filled first, least demanding last (SS → CF → 2B → 3B → RF → LF → 1B → C):
-- SS: FLD primary (catch + exchange), ARM strong (longest infield throw, from the hole to 1B), SPD for range.
-- CF: SPD primary (largest territory), FLD for tracking fly balls at speed, ARM for throws to home/3B on sac flies.
-- 2B: FLD + SPD (quick exchange on DP pivot, range up the middle). ARM minimal — shortest throw distance.
-- 3B: ARM + FLD equally weighted (hard-hit balls, long throw across the diamond). SPD for bunts and slow rollers.
-- RF: ARM primary (longest OF throw — to 3B to cut down runners). FLD + SPD for gap coverage.
-- LF: All three matter — SPD + FLD for range and catches, ARM for throws to home and 3B (similar distance to RF's throw to 3B). Don't hide a weak ARM here.
-- C: ARM primary (steal prevention — steals are common at higher stat levels). FLD for blocking wild pitches and exchange speed on steal throws. SPD for mobility.
-- 1B: FLD primary (scooping throws in the dirt). SPD for stretches and reaching balls. ARM for occasional relays. Least defensive infield spot.
+Position scoring is based on weighted sim stats. Recalibrated 2026 from replay OUTCOME data: **FLD — not ARM — is the strongest predictor of converting plays across the infield** (FLD↔plays-above-expected ≈ .9 at SS/2B/3B; ARM has ~0 marginal effect on out conversion once overall quality is controlled). ARM's infield value is real but lives in DP turns / throw margin / runner deterrence, which the data can't directly score — so treat infield ARM as a tiebreaker prior, not the top stat. Outfield outs are won by range (SPD).
+- SS: FLD primary (converting plays — the strongest validated signal). SPD for range. ARM moderate (long throw from the hole + DP relay) — a tiebreaker, not the lead stat.
+- CF: SPD primary (largest territory). FLD for tracking; ARM for throws to home/3B.
+- 2B: FLD primary + SPD (range up the middle, DP-pivot exchange). ARM minimal — shortest throw.
+- 3B: FLD primary + SPD (reaction + range; both validated strong at the hot corner). ARM secondary (the long throw) — not the dominant stat the old guidance implied.
+- RF: SPD + FLD for range (where OF outs come from). ARM valued for the long throw to 3B/home, but that's deterrence (holding runners), not extra outs — strong-arm corner.
+- LF: SPD + FLD for range and catches. ARM least critical of the OF spots.
+- C: steal defense is the main visible lever, but replay shows caught-stealing barely tracks ARM, and most catcher defense (blocking/framing/exchange) is UNMEASURED — treat C defensive stats as LOW confidence and prioritize the bat.
+- 1B: FLD primary (scooping throws in the dirt). SPD for stretches. ARM minimal. Least defensive infield spot.
 
 ## Batting order
 Sabermetric slot assignment based on wOBA, OBP, ISO, and K%:
@@ -98,6 +98,11 @@ Sabermetric slot assignment based on wOBA, OBP, ISO, and K%:
 - #9: Lowest wOBA
 
 Pitcher bats wherever their stats place them — Two Way archetypes can be strong hitters and should NOT be pinned to #9. Be cautious with small sample sizes (< 30 AB) — early stats can be misleading.
+
+## Pitch types (from replay analysis)
+This is a high-whiff sim. Observed put-away effectiveness (whiff rate / lowest contact), best → worst: **Sinker ≈ Cutter > Slider > Curveball > 2-Seam Fastball > 4-Seam Fastball** (the 4-seam is the most hittable). Use this to judge a pitcher's arsenal and to advise pitch-talent investment.
+- A pitcher who throws essentially ONE pitch type (e.g. 4-seam only) is a clear weakness — flag it and suggest adding a breaking/offspeed pitch.
+- Caveat: a pitch's "mistake rate" is driven by the PITCHER's control, not the pitch type itself — don't attribute a high mistake rate to the pitch. Judge pitch types by whiff and contact-suppression, pitchers by their own mistake rate.
 
 ## Game structure
 - Fixed 9-player lineup. No DH. No in-game substitutions.

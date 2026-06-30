@@ -257,6 +257,8 @@ function buildSplits(byPos: Map<number, { games: number; sum: Sums }>): PlayerPo
       stealAttempts: s.stealAttempts,
       caughtStealing: s.caughtStealing,
       dp: s.dpInvolved,
+      basesSaved: Math.round(s.basesSavedSum * 100) / 100,
+      basesSavedOpps: s.basesSavedOpps,
     });
   }
   // Most-played first (tie-break by chances), so [0] is the primary position.
@@ -376,7 +378,7 @@ function aggregate(rows: { playerId: string; playerName: string; position: numbe
     // chances, so this gate would collapse its game count to "games with a
     // steal attempt" — badly under-reporting games CAUGHT. Count any game the
     // player was the catcher; steal-relevant counts live in their own columns.
-    const fieldedHere = r.position === 2 || m.chances > 0 || m.putouts > 0 || m.assists > 0 || m.stealAttempts > 0;
+    const fieldedHere = r.position === 2 || m.chances > 0 || m.putouts > 0 || m.assists > 0 || m.stealAttempts > 0 || m.basesSavedOpps > 0;
     if (r.position != null && fieldedHere) {
       let bp = a.byPos.get(r.position);
       if (!bp) { bp = { games: 0, sum: zeroSums() }; a.byPos.set(r.position, bp); }
@@ -400,6 +402,10 @@ function aggregate(rows: { playerId: string; playerName: string; position: numbe
       avgEV: s.evCount ? Math.round((s.evSum / s.evCount) * 10) / 10 : null,
       maxEV: a.maxEV || null,
       sweetSpotRate: s.bip ? Math.round((s.sweetSpot / s.bip) * 1000) / 1000 : null,
+      xwobaCon: s.bip ? Math.round((s.xwobaConSum / s.bip) * 1000) / 1000 : null,
+      wobaCon: s.bip
+        ? Math.round(((0.89 * (s.hits - s.doubles - s.triples - s.hr) + 1.27 * s.doubles + 1.62 * s.triples + 2.10 * s.hr) / s.bip) * 1000) / 1000
+        : null,
       bbMix: { ground: s.ground, line: s.line, fly: s.fly, popup: s.popup },
       swings: s.swings, whiffs: s.whiffs, chases: s.chases,
       whiffRate: s.swings ? Math.round((s.whiffs / s.swings) * 1000) / 1000 : null,
@@ -412,6 +418,9 @@ function aggregate(rows: { playerId: string; playerName: string; position: numbe
       releaseAvg: s.releaseCount ? Math.round((s.releaseSum / s.releaseCount) * 1000) / 1000 : null,
       pae: Math.round((s.engagedOuts - s.expectedOuts) * 10) / 10,
       expectedOuts: Math.round(s.expectedOuts * 10) / 10,
+      basesSaved: s.basesSavedOpps > 0 ? Math.round(s.basesSavedSum * 100) / 100 : null,
+      basesSavedPerGame: s.basesSavedOpps > 0 && a.games > 0 ? Math.round((s.basesSavedSum / a.games) * 100) / 100 : null,
+      basesSavedOpps: s.basesSavedOpps,
       stealAttempts: s.stealAttempts,
       caughtStealing: s.caughtStealing,
       csRate: s.stealAttempts > 0 ? Math.round((s.caughtStealing / s.stealAttempts) * 1000) / 1000 : null,
@@ -425,11 +434,11 @@ function aggregate(rows: { playerId: string; playerName: string; position: numbe
 
 const NUMERIC_KEYS: (keyof PlayerGameMetrics)[] = [
   'pa', 'ab', 'hits', 'doubles', 'triples', 'hr', 'k', 'bb', 'bip',
-  'evSum', 'evCount', 'sweetSpot', 'ground', 'line', 'fly', 'popup',
+  'evSum', 'evCount', 'sweetSpot', 'xwobaConSum', 'ground', 'line', 'fly', 'popup',
   'swings', 'whiffs', 'chases', 'pitchesSeen',
   'putouts', 'assists', 'fieldErrors', 'chances', 'closePlays',
   'rangeSum', 'rangeCount', 'throwSpeedSum', 'throwSpeedCount', 'releaseSum', 'releaseCount',
-  'expectedOuts', 'engagedOuts', 'leverageSum', 'stealAttempts', 'caughtStealing',
+  'expectedOuts', 'engagedOuts', 'leverageSum', 'basesSavedSum', 'basesSavedOpps', 'stealAttempts', 'caughtStealing',
   'dpInvolved', 'dpStarted', 'dpTurned', 'dpFinished',
 ];
 

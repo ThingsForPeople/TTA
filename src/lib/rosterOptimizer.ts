@@ -211,21 +211,34 @@ export type StatWeights = Record<string, Record<string, number>>;
 // In-sim stat meanings: FLD = catch chance + throw-exchange (hands/transfer),
 // ARM = throw velocity, SPD = fielding range + baserunning. Each row sums to
 // 1.0 so positions stay comparable (baseScore = Σ statValue × weight).
-// Tuned to THIS sim, not real MLB. Two empirical findings drive the shape:
-//  • Infielders convert grounders ~95-100% regardless of range — the THROW
-//    (and the DP relay) is what makes the out, so ARM leads across the infield.
-//  • Outfield balls land in the in-doubt range band — SPD/range carries the
-//    leverage by a wide margin; the OF arm is mostly invisible deterrence, so
-//    it ranks second, roughly even with FLD.
+// Tuned to THIS sim, not real MLB.
+//
+// REVISED 2026-06-29 from outcome data (see docs/defense-analysis-findings.md):
+// pooled all teams, joined era-aligned sim stats to actual fielding outcomes.
+//  • Infield is FLD-led, NOT arm-led. FLD is the dominant, stable predictor of
+//    converting plays (FLD→PAE: SS 0.94, 3B 0.92, 2B 0.87); once the
+//    overall-quality halo is removed, ARM has ~0 marginal signal for out
+//    conversion. The old "ARM #1 at SS/2B/3B" was an assumption the data
+//    refutes. ARM is kept ~0.20 at the infield as an explicit PRIOR for DP
+//    turns / throw margin / deterrence — none of which PAE can measure — not
+//    because the data supports it.
+//  • Outfield stays SPD-led (range). OF stats barely predict PAE (outs), but
+//    the OF's real value is extra-base suppression (range to cut the ball off),
+//    which PAE can't see; SPD is the most defensible OF stat. RF arm kept up
+//    for the long throw / deterrence prior. (bases-saved metric is the planned
+//    proper measure — see findings doc.)
+//  • Catcher: LOW CONFIDENCE. Caught-stealing barely tracks sim ARM (n=15,
+//    weak/unstable), so ARM moderated down; catcher defense is largely
+//    unmeasured (blocking/framing/exchange never appear in the log).
 export const DEFAULT_STAT_WEIGHTS: StatWeights = {
-  SS:  { fld: 0.27, arm: 0.40, spd: 0.33 }, // arm #1 (throw from the hole + DP), range close
-  '2B': { fld: 0.32, arm: 0.40, spd: 0.28 }, // arm #1 for the pivot/throw; hands for the turn
-  '3B': { fld: 0.26, arm: 0.52, spd: 0.22 }, // hot-corner cannon; arm dominant
-  C:   { fld: 0.42, arm: 0.48, spd: 0.10 }, // caught-stealing arm #1, receiving close
-  '1B': { fld: 0.55, arm: 0.10, spd: 0.35 }, // receiver — scoops throws, barely throws
-  CF:  { fld: 0.18, arm: 0.20, spd: 0.62 }, // speed by a longshot; arm ≈ fld
-  LF:  { fld: 0.20, arm: 0.17, spd: 0.63 }, // low-arm corner — replay assists ≈0/g; hide a fast/weak arm here
-  RF:  { fld: 0.20, arm: 0.30, spd: 0.50 }, // strong-arm corner — the long throw (3B/home); replay assists ~0.38/g
+  SS:  { fld: 0.52, arm: 0.20, spd: 0.28 }, // FLD-led (r≈.94); arm = DP/throw prior, not measured
+  '2B': { fld: 0.50, arm: 0.20, spd: 0.30 }, // FLD-led (r≈.87); arm = pivot prior
+  '3B': { fld: 0.44, arm: 0.20, spd: 0.36 }, // FLD + range both strong; arm = throw prior
+  C:   { fld: 0.45, arm: 0.35, spd: 0.20 }, // low confidence — CS barely tracks arm; C defense mostly unmeasured
+  '1B': { fld: 0.52, arm: 0.12, spd: 0.36 }, // receiver — scoops throws, barely throws
+  CF:  { fld: 0.20, arm: 0.18, spd: 0.62 }, // speed by a longshot; arm ≈ fld
+  LF:  { fld: 0.22, arm: 0.15, spd: 0.63 }, // low-arm corner — range/speed; hide a weak arm here
+  RF:  { fld: 0.22, arm: 0.28, spd: 0.50 }, // strong-arm corner — the long throw (3B/home) prior
 };
 
 const STAT_LABELS: Record<string, string> = { fld: 'FLD', arm: 'ARM', spd: 'SPD' };

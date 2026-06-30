@@ -22,6 +22,9 @@ export interface BattingSlot {
 export interface BattingOrderResult {
   recommended: BattingSlot[];
   benched: Player[];
+  // Expected runs/game for the recommended order from the lineup simulator
+  // (deterministic Monte Carlo). Present when there are enough hitters to sim.
+  expectedRuns?: number;
 }
 
 // Standard linear weights (2024 MLB environment, close enough for game sims).
@@ -61,11 +64,17 @@ function profile(p: Player): PlayerProfile | undefined {
   const slg = b.slg ?? (ab > 0 ? (singles + 2 * doubles + 3 * triples + 4 * hr) / ab : 0);
   const avg = b.avg ?? (ab > 0 ? (b.h ?? 0) / ab : 0);
 
-  // Regress small samples toward league-average (.320 wOBA) so a 3-for-5
-  // start doesn't outrank a proven hitter. Full weight at RELIABLE_PA.
+  // Regress small samples toward league-average so a 3-for-5 start doesn't
+  // outrank a proven hitter. Full weight at RELIABLE_PA.
+  // NOTE (2026-06-29): Tiny Teams is a HIGH-offense sim — measured league
+  // ≈ .444 wOBA / .428 OBP across all teams (docs/offense-hitting-findings.md),
+  // not the ~.320 of real MLB. The old .320 anchors dragged every low-PA hitter
+  // down ~.12, systematically under-rating small-sample players. These match
+  // the sim environment (same raw-linear-weights/PA scale as `woba` above).
+  // TODO: derive from the team/league population at runtime for self-calibration.
   const confidence = Math.min(pa / RELIABLE_PA, 1);
-  const LEAGUE_AVG_WOBA = 0.320;
-  const LEAGUE_AVG_OBP = 0.320;
+  const LEAGUE_AVG_WOBA = 0.440;
+  const LEAGUE_AVG_OBP = 0.430;
   const regressedWoba = confidence * woba + (1 - confidence) * LEAGUE_AVG_WOBA;
   const rawObp = b.obp ?? (pa > 0 ? ((b.h ?? 0) + bb) / pa : 0);
   const regressedObp = confidence * rawObp + (1 - confidence) * LEAGUE_AVG_OBP;
@@ -129,7 +138,10 @@ export const TALENT_VALUES: Record<string, TalentValue> = {
   // ── Runners-on talents → best(3), cleanup(4), protection(5) ──
   'Clutch':             { roles: { best: 0.07, cleanup: 0.06, protection: 0.05 }, global: 0.02 },
   'Pressure Cooker':    { roles: { best: 0.05, cleanup: 0.05, protection: 0.04 }, global: 0.01 },
-  'Mental Warfare':     { roles: { best: 0.04, cleanup: 0.04, protection: 0.03 }, global: 0.02 },
+  // Bumped 2026-06-29: replay analysis found Mental Warfare the single biggest
+  // contact-quality swing of any hitting talent (+7.8 EV when it fires, with
+  // runners on), so it earns a stronger runners-on (best/cleanup/protection) tilt.
+  'Mental Warfare':     { roles: { best: 0.05, cleanup: 0.05, protection: 0.04 }, global: 0.03 },
 
   // ── Chain / next-batter talents → higher in order to maximize downstream ──
   'Clutch Cascade':     { roles: { best: 0.05, cleanup: 0.04, quality: 0.04 }, global: 0.02 },
@@ -355,7 +367,9 @@ function slotFit(p: Player, slot: number, ms: PlayerMetaStore, mult = 1): number
   const pr = profile(p);
   if (!pr) return tb; // no stats yet → sorts to the bottom, still placeable
   switch (slot) {
-    case 1: return pr.obp * WOBA_SCALE + 0.3 * pr.bbRate - 0.4 * pr.kRate + tb;
+    // K% mostly double-counts OBP (which already reflects strikeouts), so its
+    // marginal leadoff value is ~0 in the data — trimmed 0.4→0.15 (2026-06-29).
+    case 1: return pr.obp * WOBA_SCALE + 0.3 * pr.bbRate - 0.15 * pr.kRate + tb;
     case 2: return pr.woba + 0.3 * pr.obp + tb;
     case 4: return pr.woba + 0.4 * pr.isoP + tb;
     case 5: return pr.woba - 0.4 * pr.kRate + tb;
@@ -364,14 +378,102 @@ function slotFit(p: Player, slot: number, ms: PlayerMetaStore, mult = 1): number
   }
 }
 
+// ── Lineup run-expectancy simulator (RE-optimal order) ──────────────
+// Deterministic Monte Carlo: play the order through 9-inning games and average
+// runs. Used to refine the role-based order toward maximum run production. Two
+// design choices keep it sound: (1) a SEEDED RNG (mulberry32) → stable, non-
+// flickering recommendations; (2) COMMON RANDOM NUMBERS — every order is scored
+// on the SAME seed, so order-vs-order comparisons cancel the simulation noise
+// and reflect the lineup, not the dice. Advancement is standard and simplified
+// (single: runners +1 base, 3rd scores; double: +2, batter to 2nd; etc.); the
+// model is approximate but CONSISTENT across orders, which is what ordering
+// needs. Expected runs land near RE(empty,0)×9 for this sim (~7-8/game).
+function mulberry32(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+interface BatterRates { out: number; bb: number; b1: number; b2: number; b3: number; hr: number }
+const LEAGUE_RATES: BatterRates = { out: 0.50, bb: 0.08, b1: 0.24, b2: 0.09, b3: 0.02, hr: 0.07 };
+
+// Per-batter PA outcome probabilities from box stats, regressed toward league
+// for small samples (same confidence ramp as profile()).
+function batterRates(p: Player): BatterRates {
+  const b = p.batting;
+  if (!b) return LEAGUE_RATES;
+  const ab = b.ab ?? 0, bb = b.bb ?? 0, pa = ab + bb;
+  if (pa <= 0) return LEAGUE_RATES;
+  const hr = b.hr ?? 0, t3 = b.triples ?? 0, t2 = b.doubles ?? 0;
+  const b1 = b.singles ?? Math.max(0, (b.h ?? 0) - t2 - t3 - hr);
+  const raw = { bb: bb / pa, hr: hr / pa, b3: t3 / pa, b2: t2 / pa, b1: b1 / pa };
+  const out = Math.max(0, 1 - (raw.bb + raw.hr + raw.b3 + raw.b2 + raw.b1));
+  const conf = Math.min(pa / RELIABLE_PA, 1);
+  const mix = (r: number, lg: number) => conf * r + (1 - conf) * lg;
+  return {
+    out: mix(out, LEAGUE_RATES.out), bb: mix(raw.bb, LEAGUE_RATES.bb), b1: mix(raw.b1, LEAGUE_RATES.b1),
+    b2: mix(raw.b2, LEAGUE_RATES.b2), b3: mix(raw.b3, LEAGUE_RATES.b3), hr: mix(raw.hr, LEAGUE_RATES.hr),
+  };
+}
+
+const SIM_GAMES = 1000;
+const SIM_SEED = 0x9e3779b9; // fixed → deterministic + common-random-numbers
+
+// Expected runs/game for a batting order. `rates` is the per-slot outcome table
+// (precomputed once and reordered by the optimizer to avoid recompute churn).
+function simulateLineupRuns(rates: BatterRates[], games = SIM_GAMES, seed = SIM_SEED): number {
+  const n = rates.length;
+  if (n === 0) return 0;
+  const rand = mulberry32(seed);
+  let total = 0;
+  for (let g = 0; g < games; g++) {
+    let batter = 0, runs = 0;
+    for (let inning = 0; inning < 9; inning++) {
+      let outs = 0, first = false, second = false, third = false;
+      while (outs < 3) {
+        const r = rates[batter % n]; batter++;
+        let x = rand();
+        if (x < r.out) { outs++; continue; }
+        x -= r.out;
+        if (x < r.bb) { // walk — force only
+          if (first && second && third) runs++;
+          else if (first && second) third = true;
+          else if (first) second = true;
+          first = true;
+        } else if ((x -= r.bb) < r.b1) { // single
+          if (third) runs++;
+          third = second; second = first; first = true;
+        } else if ((x -= r.b1) < r.b2) { // double
+          if (third) runs++; if (second) runs++;
+          third = first; second = true; first = false;
+        } else if ((x -= r.b2) < r.b3) { // triple
+          if (first) runs++; if (second) runs++; if (third) runs++;
+          first = false; second = false; third = true;
+        } else { // home run
+          runs += 1 + (first ? 1 : 0) + (second ? 1 : 0) + (third ? 1 : 0);
+          first = second = third = false;
+        }
+      }
+    }
+    total += runs;
+  }
+  return total / games;
+}
+
 /**
  * Lineup construction by global assignment.
  *
  * 1. Hard-pin slot-locked talents (e.g. The Janitor → cleanup).
  * 2. Pick the best N hitters to fill N slots (pinned holders always play).
  * 3. Seed an assignment greedily, then run 2-opt swaps to maximize total
- *    lineup fit. Talent value (including slot-affinity bonuses) is already
- *    baked into slotFit, so this single pass is the only recommendation.
+ *    lineup fit (role + per-slot leverage). Talent value is baked into slotFit.
+ * 4. In stat mode, a final RE-based 2-opt refines the order to maximize actual
+ *    expected runs (the simulator above) — seeded from the already-good role
+ *    order, so it only moves a hitter when it genuinely scores more runs.
  */
 function buildBattingOrder(
   team: Team,
@@ -460,6 +562,40 @@ function buildBattingOrder(
     }
   }
 
+  // 3d. RE-optimal refinement (stat mode only — talent mode keeps slot affinity).
+  //     Seeded from the role order above, a 2-opt over the lineup SIMULATOR moves
+  //     a hitter only when it raises expected runs (common-random-numbers, so the
+  //     comparison is noise-free). Worst case it changes nothing.
+  const filledSlots = slotList.filter((s) => assign.has(s));
+  let expectedRuns: number | undefined;
+  if (filledSlots.length >= 2) {
+    const rateCache = new Map<Player, BatterRates>();
+    const ratesFor = (p: Player) => {
+      let r = rateCache.get(p);
+      if (!r) { r = batterRates(p); rateCache.set(p, r); }
+      return r;
+    };
+    const orderRates = () => filledSlots.map((s) => ratesFor(assign.get(s)!));
+    let bestRuns = simulateLineupRuns(orderRates());
+    if (!useLocks) {
+      let reImproved = true, reGuard = 0;
+      while (reImproved && reGuard++ < 30) {
+        reImproved = false;
+        for (let i = 0; i < filledSlots.length; i++) {
+          for (let j = i + 1; j < filledSlots.length; j++) {
+            const si = filledSlots[i], sj = filledSlots[j];
+            const pi = assign.get(si)!, pj = assign.get(sj)!;
+            assign.set(si, pj); assign.set(sj, pi);
+            const cand = simulateLineupRuns(orderRates());
+            if (cand > bestRuns + 1e-9) { bestRuns = cand; reImproved = true; }
+            else { assign.set(si, pi); assign.set(sj, pj); } // revert
+          }
+        }
+      }
+    }
+    expectedRuns = Math.round(bestRuns * 100) / 100;
+  }
+
   const recommended: BattingSlot[] = slotList
     .filter((slot) => assign.has(slot))
     .map((slot) => {
@@ -482,7 +618,7 @@ function buildBattingOrder(
       };
     });
 
-  return { recommended, benched };
+  return { recommended, benched, expectedRuns };
 }
 
 export function recommendBattingOrder(

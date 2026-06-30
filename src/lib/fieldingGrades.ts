@@ -16,6 +16,7 @@ export interface FieldingGrade {
   armAvg: number | null;
   armZ: number; // arm speed relative to the team (z-score)
   fieldPct: number | null;
+  basesSavedPerGame: number; // OF extra-base suppression per game (the range PAE can't see)
 }
 
 export type FieldingGrades = Record<string, FieldingGrade>;
@@ -51,6 +52,7 @@ export function buildFieldingGrades(players: AggregatedPlayer[]): FieldingGrades
       armAvg,
       armZ: armAvg != null ? (armAvg - mean) / std : 0,
       fieldPct: sp?.fieldPct ?? p.fieldPct,
+      basesSavedPerGame: sp && sp.games > 0 ? (sp.basesSaved ?? 0) / sp.games : 0,
     };
   }
   return grades;
@@ -66,6 +68,9 @@ const MIN_GAMES = 10;
 const PAE_SCALE = 60; // ~0.25 PAE/game → ~15 pts (enough to flip close calls)
 const PAE_CAP = 25;
 const ARM_SCALE = 9; // small transferable nudge from a real cannon / weak arm
+const OF_POSITIONS = new Set(['LF', 'CF', 'RF']);
+const BASES_SAVED_SCALE = 18; // ~0.3 bases-saved/game → ~5 pts
+const BASES_SAVED_CAP = 12;
 
 export function empiricalFieldingBonus(
   position: string,
@@ -82,6 +87,11 @@ export function empiricalFieldingBonus(
   if (g.primaryPos === position) {
     const conf = Math.min(g.games / 25, 1);
     bonus += clamp(g.paePerGame * PAE_SCALE, -PAE_CAP, PAE_CAP) * conf;
+    // Outfield value PAE can't see: extra-base suppression (bases saved). Only
+    // at OF, where most "chances" are retrievals rather than out opportunities.
+    if (OF_POSITIONS.has(position) && g.basesSavedPerGame) {
+      bonus += clamp(g.basesSavedPerGame * BASES_SAVED_SCALE, -BASES_SAVED_CAP, BASES_SAVED_CAP) * conf;
+    }
   }
   // Transferable arm: a measured strong/weak arm matters most where arm matters.
   bonus += g.armZ * ARM_SCALE * armImportance;

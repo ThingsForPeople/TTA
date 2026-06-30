@@ -28,8 +28,8 @@ function effImp(pi: PositionImportance): number {
   return DEFAULT_POSITION_IMPORTANCE[pi.position] ?? 1;
 }
 
-type View = 'fielding' | 'batting' | 'positions' | 'alignment' | 'heatmap';
-const VIEW_LABEL: Record<View, string> = { fielding: 'fielding', batting: 'batting', positions: 'by position', alignment: 'best alignment', heatmap: 'heat map' };
+type View = 'fielding' | 'positions' | 'alignment' | 'heatmap';
+const VIEW_LABEL: Record<View, string> = { fielding: 'fielding', positions: 'by position', alignment: 'best alignment', heatmap: 'heat map' };
 
 // Fielded-ball heat bin (mirrors the route's HeatBin). x,y are integer field
 // coords (origin = home plate, +x = RF side, −y = deeper).
@@ -314,19 +314,7 @@ const FIELDING_COLS: Column[] = [
   { key: 'closePlays', label: 'Tough', title: 'Difficult plays converted', get: (p) => p.closePlays, fmt: int },
   { key: 'dp', label: 'DP', title: 'Double plays turned (any role: started / pivoted / finished), summed across games', get: (p) => p.dp, fmt: int },
   { key: 'caughtStealing', label: 'CS', title: 'Runners caught stealing (catcher) — attempts & rate shown in insights', get: (p) => p.caughtStealing, fmt: int },
-];
-
-const BATTING_COLS: Column[] = [
-  { key: 'pa', label: 'PA', get: (p) => p.pa, fmt: int },
-  { key: 'avg', label: 'AVG', get: (p) => p.avg, fmt: rate3 },
-  { key: 'obp', label: 'OBP', get: (p) => p.obp, fmt: rate3 },
-  { key: 'kRate', label: 'K%', get: (p) => p.kRate, fmt: (v) => (v == null ? '·' : Math.round(v * 100) + '%') },
-  { key: 'bbRate', label: 'BB%', get: (p) => p.bbRate, fmt: (v) => (v == null ? '·' : Math.round(v * 100) + '%') },
-  { key: 'avgEV', label: 'Avg EV', get: (p) => p.avgEV, fmt: num1 },
-  { key: 'maxEV', label: 'Max EV', get: (p) => p.maxEV, fmt: num1 },
-  { key: 'sweetSpotRate', label: 'Sweet%', title: 'Launch angle 8–32°', get: (p) => p.sweetSpotRate, fmt: (v) => (v == null ? '·' : Math.round(v * 100) + '%') },
-  { key: 'whiffRate', label: 'Whiff%', get: (p) => p.whiffRate, fmt: (v) => (v == null ? '·' : Math.round(v * 100) + '%') },
-  { key: 'chases', label: 'Chase', title: 'Swings out of zone', get: (p) => p.chases, fmt: int },
+  { key: 'basesSaved', label: 'BsSv', title: 'Bases saved (outfield) — extra-base suppression: bases held below the ball’s expected total over balls the OF retrieved (ground balls already through for a hit). Positive = held hits short. The OF value PAE can’t see; re-sync to populate.', get: (p) => p.basesSaved, fmt: signed1 },
 ];
 
 // A per-position split is "rankable" (eligible to be flagged best) only with
@@ -648,7 +636,7 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
     }
   }, [posImp, teamUuid, onDataChange, derivedStatWeights]);
 
-  const cols = view === 'fielding' ? FIELDING_COLS : BATTING_COLS;
+  const cols = FIELDING_COLS;
 
   const sorted = useMemo(() => {
     const col = cols.find((c) => c.key === sortKey);
@@ -701,8 +689,8 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
 
   return (
     <CollapsiblePanel
-      title="Advanced stats"
-      subtitle="Fielding & contact metrics derived from game replays — not exposed by the public stat API. Sync processes the most-recent 100 games (older stored games are pruned)."
+      title="Advanced fielding"
+      subtitle="Fielding metrics derived from game replays — not exposed by the public stat API. Sync processes the most-recent 100 games (older stored games are pruned) and also feeds Advanced batting in the Batting section."
       headerAction={
         <div className="flex items-center gap-1.5">
           <button
@@ -748,7 +736,7 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
           {/* Controls */}
           <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
             <div className="flex rounded border border-slate-700">
-              {(['fielding', 'batting', 'positions', 'alignment', 'heatmap'] as const).map((v) => (
+              {(['fielding', 'positions', 'alignment', 'heatmap'] as const).map((v) => (
                 <button
                   key={v}
                   type="button"
