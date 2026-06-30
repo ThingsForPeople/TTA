@@ -93,7 +93,7 @@ export function ReplayAnalysis({ teamUuid, gameId }: Props) {
                   <span
                     key={t.talentId}
                     className="rounded bg-purple-500/15 px-2 py-0.5 text-xs text-purple-200"
-                    title={`${t.count} trigger${t.count === 1 ? '' : 's'} this game` + (t.effects && t.count ? ` · ${(t.effects / t.count).toFixed(1)} effect(s) applied per trigger` : '') + (t.maxTier > 1 ? ` · talent level ${t.maxTier}` : '')}
+                    title={`${t.count} trigger${t.count === 1 ? '' : 's'} this game` + (t.maxTier > 1 ? ` · talent level ${t.maxTier}` : '')}
                   >
                     {t.displayName} <span className="font-mono text-purple-300/70">×{t.count}</span>
                     {t.maxTier > 1 && <span className="ml-1 font-mono text-amber-300/80">Lv{t.maxTier}</span>}

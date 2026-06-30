@@ -501,57 +501,92 @@ function HeatMaps({ heatBins, sprayBins }: { heatBins: HeatBin[]; sprayBins: Spr
   );
 }
 
-// Cross-game talent triggering + compounding, per player. "Fires/g" = how often
-// the talent triggers per game; "Peak"/"Stack%" = how often/how high it stacks
-// (effect.applied tier). Answers "how often does Waste No Time stack for him?".
+// Cross-game talent usage. One flat, sortable, filterable table (a player
+// dropdown + a talent search) instead of a per-player wall — so you can find
+// e.g. "waste" for one player, or sort by Fires/g to see what's most active.
+// Shows how OFTEN each talent triggers; the replay doesn't expose in-game stack
+// depth (tier = talent level), so there's no "stacking" column.
+type TalentRow = { player: string; playerId: string; games: number; name: string; acts: number; perGame: number; maxTier: number };
+type TalentSort = 'perGame' | 'acts' | 'maxTier' | 'name' | 'player';
+
 function TalentView({ players }: { players: AggregatedPlayer[] }) {
-  const totalActs = (p: AggregatedPlayer) => (p.talents ?? []).reduce((s, t) => s + t.acts, 0);
-  const rows = players.filter((p) => (p.talents?.length ?? 0) > 0).sort((a, b) => totalActs(b) - totalActs(a));
-  if (rows.length === 0) {
+  const [playerId, setPlayerId] = useState('all');
+  const [q, setQ] = useState('');
+  const [sortKey, setSortKey] = useState<TalentSort>('perGame');
+  const [dir, setDir] = useState<'asc' | 'desc'>('desc');
+
+  const withTalents = players.filter((p) => (p.talents?.length ?? 0) > 0);
+  if (withTalents.length === 0) {
     return (
       <p className="text-sm text-slate-400">
-        No talent data yet — run <span className="text-emerald-300">Clear &amp; re-sync</span> to capture talent triggering + stacking from replays.
+        No talent data yet — run <span className="text-emerald-300">Clear &amp; re-sync</span> to capture talent triggering from replays.
       </p>
     );
   }
+
+  const needle = q.trim().toLowerCase();
+  let rows: TalentRow[] = withTalents
+    .filter((p) => playerId === 'all' || p.playerId === playerId)
+    .flatMap((p) => p.talents.map((t) => ({ player: p.name, playerId: p.playerId, games: p.games, name: t.name, acts: t.acts, perGame: t.perGame, maxTier: t.maxTier })));
+  if (needle) rows = rows.filter((r) => r.name.toLowerCase().includes(needle));
+  rows.sort((a, b) => {
+    const s = dir === 'asc' ? 1 : -1;
+    if (sortKey === 'name') return s * a.name.localeCompare(b.name);
+    if (sortKey === 'player') return s * a.player.localeCompare(b.player) || a.name.localeCompare(b.name);
+    return s * ((a[sortKey] as number) - (b[sortKey] as number));
+  });
+
+  const showPlayer = playerId === 'all';
+  const toggle = (k: TalentSort) => {
+    if (sortKey === k) setDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(k); setDir(k === 'name' || k === 'player' ? 'asc' : 'desc'); }
+  };
+  const arrow = (k: TalentSort) => (sortKey === k ? (dir === 'asc' ? ' ▲' : ' ▼') : '');
+  const Th = ({ k, label, title, num }: { k: TalentSort; label: string; title?: string; num?: boolean }) => (
+    <th title={title} onClick={() => toggle(k)} className={'cursor-pointer select-none px-1.5 py-1 hover:text-slate-300 ' + (num ? 'text-right' : 'text-left')}>{label}{arrow(k)}</th>
+  );
+
   return (
-    <div className="space-y-4">
-      {rows.map((p) => (
-        <div key={p.playerId}>
-          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">
-            {p.name} <span className="text-slate-600">({p.games}g)</span>
-          </h4>
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-xs">
-              <thead>
-                <tr className="border-b border-slate-800 text-[10px] uppercase tracking-wider text-slate-500">
-                  <th className="px-2 py-1 text-left">Talent</th>
-                  <th className="px-1.5 py-1 text-right" title="Average times this talent triggered per game">Fires/g</th>
-                  <th className="px-1.5 py-1 text-right" title="Total triggers across all games in view">Total</th>
-                  <th className="px-1.5 py-1 text-right" title="Effects applied per trigger. >1 means the talent applies multiple effects each time it fires (the closest thing to compounding the replay exposes).">Eff/trig</th>
-                  <th className="px-1.5 py-1 text-right" title="Talent level (from the roster). NOT an in-game stack — the replay does not expose per-game charge/stack depth.">Lvl</th>
-                </tr>
-              </thead>
-              <tbody>
-                {p.talents.map((t) => {
-                  const perTrig = t.acts > 0 ? t.effects / t.acts : 0;
-                  return (
-                    <tr key={t.name} className="border-b border-slate-800/60 text-slate-300 last:border-0">
-                      <td className="px-2 py-1 whitespace-nowrap">{t.name}</td>
-                      <td className="px-1.5 py-1 text-right font-mono">{t.perGame.toFixed(1)}</td>
-                      <td className="px-1.5 py-1 text-right font-mono text-slate-500">{t.acts}</td>
-                      <td className={'px-1.5 py-1 text-right font-mono ' + (perTrig > 1.05 ? 'text-amber-300/80' : 'text-slate-600')}>{t.effects > 0 ? '×' + perTrig.toFixed(1) : '·'}</td>
-                      <td className="px-1.5 py-1 text-right font-mono text-slate-500">{t.maxTier > 0 ? t.maxTier : '·'}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ))}
-      <p className="text-[10px] text-slate-600">
-        <strong>Fires/g</strong> = how often the talent triggers per game. <strong>Eff/trig</strong> = effects applied per trigger (&gt;1 = it applies multiple effects at once — the closest signal to compounding the replay exposes). <strong>Lvl</strong> = the talent’s level, not an in-game stack: the replay does <em>not</em> record per-game charge/stack depth, so true in-game stacking isn’t directly visible. Pitch arsenal excluded; re-sync to refresh.
+    <div>
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+        <select value={playerId} onChange={(e) => setPlayerId(e.target.value)} className="rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-slate-300">
+          <option value="all">All players</option>
+          {withTalents.map((p) => <option key={p.playerId} value={p.playerId}>{p.name}</option>)}
+        </select>
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="filter talent…"
+          className="rounded border border-slate-700 bg-slate-950 px-2 py-0.5 text-slate-300 placeholder:text-slate-600"
+        />
+        <span className="text-slate-500">{rows.length} row{rows.length === 1 ? '' : 's'}</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-xs">
+          <thead>
+            <tr className="border-b border-slate-800 text-[10px] uppercase tracking-wider text-slate-500">
+              {showPlayer && <Th k="player" label="Player" />}
+              <Th k="name" label="Talent" />
+              <Th k="perGame" label="Fires/g" title="Average times this talent triggered per game" num />
+              <Th k="acts" label="Total" title="Total triggers across the games in view" num />
+              <Th k="maxTier" label="Lvl" title="Talent level (from the roster). NOT an in-game stack — the replay doesn't expose per-game stack depth." num />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={r.playerId + '|' + r.name + i} className="border-b border-slate-800/60 text-slate-300 last:border-0">
+                {showPlayer && <td className="px-1.5 py-1 whitespace-nowrap text-slate-400">{r.player}</td>}
+                <td className="px-1.5 py-1 whitespace-nowrap">{r.name}</td>
+                <td className="px-1.5 py-1 text-right font-mono">{r.perGame.toFixed(1)}</td>
+                <td className="px-1.5 py-1 text-right font-mono text-slate-500">{r.acts}</td>
+                <td className="px-1.5 py-1 text-right font-mono text-slate-500">{r.maxTier > 0 ? r.maxTier : '·'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-[10px] text-slate-600">
+        <strong>Fires/g</strong> = how often the talent triggers per game (the replay records triggers, not in-game stack depth). <strong>Lvl</strong> = talent level, not a stack. Pitch arsenal excluded; re-sync to refresh. Pick a player or type to filter; click a header to sort.
       </p>
     </div>
   );
