@@ -361,7 +361,7 @@ function applyGameContext(rows: { gameId: string; position: number | null; metri
 }
 
 function aggregate(rows: { playerId: string; playerName: string; position: number | null; metrics: PlayerGameMetrics }[]): AggregatedPlayer[] {
-  type TStat = { acts: number; effects: number; stacked: number; maxTier: number };
+  type TStat = { acts: number; effects: number; stacked: number; maxTier: number; firedSwings: number; firedContact: number };
   const acc = new Map<string, { name: string; games: number; sum: Sums; maxEV: number; armMax: number; byPos: Map<number, { games: number; sum: Sums }>; talents: Map<string, TStat> }>();
   for (const r of rows) {
     const m = r.metrics;
@@ -375,9 +375,10 @@ function aggregate(rows: { playerId: string; playerName: string; position: numbe
     // Accumulate per-talent triggering + stacking across games.
     if (m.talentActs) {
       for (const [nm, v] of Object.entries(m.talentActs)) {
-        const e = a.talents.get(nm) ?? { acts: 0, effects: 0, stacked: 0, maxTier: 0 };
+        const e = a.talents.get(nm) ?? { acts: 0, effects: 0, stacked: 0, maxTier: 0, firedSwings: 0, firedContact: 0 };
         e.acts += v.acts ?? 0; e.effects += v.effects ?? 0; e.stacked += v.stacked ?? 0;
         e.maxTier = Math.max(e.maxTier, v.maxTier ?? 0);
+        e.firedSwings += v.firedSwings ?? 0; e.firedContact += v.firedContact ?? 0;
         a.talents.set(nm, e);
       }
     }
@@ -437,7 +438,7 @@ function aggregate(rows: { playerId: string; playerName: string; position: numbe
       csRate: s.stealAttempts > 0 ? Math.round((s.caughtStealing / s.stealAttempts) * 1000) / 1000 : null,
       dp: s.dpInvolved, dpStarted: s.dpStarted, dpTurned: s.dpTurned, dpFinished: s.dpFinished, dpOpp: s.dpOpp,
       talents: [...a.talents.entries()]
-        .map(([name, v]) => ({ name, acts: v.acts, effects: v.effects, stacked: v.stacked, maxTier: v.maxTier, perGame: a.games > 0 ? Math.round((v.acts / a.games) * 10) / 10 : 0 }))
+        .map(([name, v]) => ({ name, acts: v.acts, effects: v.effects, stacked: v.stacked, maxTier: v.maxTier, firedSwings: v.firedSwings, firedContact: v.firedContact, perGame: a.games > 0 ? Math.round((v.acts / a.games) * 10) / 10 : 0 }))
         .sort((x, y) => y.acts - x.acts),
       byPosition,
     });

@@ -506,8 +506,8 @@ function HeatMaps({ heatBins, sprayBins }: { heatBins: HeatBin[]; sprayBins: Spr
 // e.g. "waste" for one player, or sort by Fires/g to see what's most active.
 // Shows how OFTEN each talent triggers; the replay doesn't expose in-game stack
 // depth (tier = talent level), so there's no "stacking" column.
-type TalentRow = { player: string; playerId: string; games: number; name: string; acts: number; perGame: number; maxTier: number };
-type TalentSort = 'perGame' | 'acts' | 'maxTier' | 'name' | 'player';
+type TalentRow = { player: string; playerId: string; games: number; name: string; acts: number; perGame: number; maxTier: number; firedSwings: number; contactPct: number | null };
+type TalentSort = 'perGame' | 'acts' | 'maxTier' | 'name' | 'player' | 'contactPct';
 
 function TalentView({ players }: { players: AggregatedPlayer[] }) {
   const [playerId, setPlayerId] = useState('all');
@@ -527,12 +527,13 @@ function TalentView({ players }: { players: AggregatedPlayer[] }) {
   const needle = q.trim().toLowerCase();
   let rows: TalentRow[] = withTalents
     .filter((p) => playerId === 'all' || p.playerId === playerId)
-    .flatMap((p) => p.talents.map((t) => ({ player: p.name, playerId: p.playerId, games: p.games, name: t.name, acts: t.acts, perGame: t.perGame, maxTier: t.maxTier })));
+    .flatMap((p) => p.talents.map((t) => ({ player: p.name, playerId: p.playerId, games: p.games, name: t.name, acts: t.acts, perGame: t.perGame, maxTier: t.maxTier, firedSwings: t.firedSwings, contactPct: t.firedSwings > 0 ? t.firedContact / t.firedSwings : null })));
   if (needle) rows = rows.filter((r) => r.name.toLowerCase().includes(needle));
   rows.sort((a, b) => {
     const s = dir === 'asc' ? 1 : -1;
     if (sortKey === 'name') return s * a.name.localeCompare(b.name);
     if (sortKey === 'player') return s * a.player.localeCompare(b.player) || a.name.localeCompare(b.name);
+    if (sortKey === 'contactPct') return s * ((a.contactPct ?? -1) - (b.contactPct ?? -1));
     return s * ((a[sortKey] as number) - (b[sortKey] as number));
   });
 
@@ -569,6 +570,7 @@ function TalentView({ players }: { players: AggregatedPlayer[] }) {
               <Th k="name" label="Talent" />
               <Th k="perGame" label="Fires/g" title="Average times this talent triggered per game" num />
               <Th k="acts" label="Total" title="Total triggers across the games in view" num />
+              <Th k="contactPct" label="Contact%" title="For batting talents that fire pre-swing: contact rate on the swings where this talent fired. Observational (the talent fires in specific situations), not a controlled A/B — but it's the direct readout of a contact talent doing its job." num />
               <Th k="maxTier" label="Lvl" title="Talent level (from the roster). NOT an in-game stack — the replay doesn't expose per-game stack depth." num />
             </tr>
           </thead>
@@ -579,6 +581,7 @@ function TalentView({ players }: { players: AggregatedPlayer[] }) {
                 <td className="px-1.5 py-1 whitespace-nowrap">{r.name}</td>
                 <td className="px-1.5 py-1 text-right font-mono">{r.perGame.toFixed(1)}</td>
                 <td className="px-1.5 py-1 text-right font-mono text-slate-500">{r.acts}</td>
+                <td className="px-1.5 py-1 text-right font-mono" title={r.contactPct != null ? `contact rate on ${r.firedSwings} swings where it fired` : ''}>{r.contactPct != null ? Math.round(r.contactPct * 100) + '%' : '·'}</td>
                 <td className="px-1.5 py-1 text-right font-mono text-slate-500">{r.maxTier > 0 ? r.maxTier : '·'}</td>
               </tr>
             ))}
@@ -586,7 +589,7 @@ function TalentView({ players }: { players: AggregatedPlayer[] }) {
         </table>
       </div>
       <p className="mt-2 text-[10px] text-slate-600">
-        <strong>Fires/g</strong> = how often the talent triggers per game (the replay records triggers, not in-game stack depth). <strong>Lvl</strong> = talent level, not a stack. Pitch arsenal excluded; re-sync to refresh. Pick a player or type to filter; click a header to sort.
+        <strong>Fires/g</strong> = how often the talent triggers per game. <strong>Contact%</strong> = contact rate on the swings where a batting talent fired (observational — its situational, not a controlled test — but it’s the direct readout of a contact talent working). <strong>Lvl</strong> = talent level, not an in-game stack (the replay doesn’t record stack depth). Pitch arsenal excluded; re-sync to refresh. Pick a player or type to filter; click a header to sort.
       </p>
     </div>
   );

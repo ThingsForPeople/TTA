@@ -641,9 +641,11 @@ export interface PlayerGameMetrics {
   oppSpray?: { x: number; y: number; o: boolean }[];
   // Per-talent triggering this game (batting/fielding/zone only — pitch arsenal
   // excluded). Keyed by displayName. acts = triggers; effects = effect.applied
-  // count (effects/acts > 1 ⇒ multiple effects per trigger); maxTier = talent
-  // LEVEL (static, not stacking). Aggregated for the cross-game talent overview.
-  talentActs?: Record<string, { acts: number; effects: number; stacked: number; maxTier: number }>;
+  // count; maxTier = talent LEVEL (static, not stacking). firedSwings/firedContact
+  // = for batting talents that fire pre-swing, swings on which the talent fired
+  // and how many made contact (so we can show "fired N×, contact X%"). Aggregated
+  // for the cross-game talent overview.
+  talentActs?: Record<string, { acts: number; effects: number; stacked: number; maxTier: number; firedSwings: number; firedContact: number }>;
 }
 
 // Batted-ball spray geometry. `horizontalAngle` is a bearing where ≈ −90° is
@@ -776,7 +778,7 @@ export interface AggregatedPlayer {
   // acts = total triggers; effects = effect applications (effects/acts > 1 ⇒
   // multiple effects per trigger); maxTier = talent LEVEL (not a stack); perGame
   // = acts/games. Empty until games are (re-)synced with talent data.
-  talents: { name: string; acts: number; effects: number; stacked: number; maxTier: number; perGame: number }[];
+  talents: { name: string; acts: number; effects: number; stacked: number; maxTier: number; firedSwings: number; firedContact: number; perGame: number }[];
   // per-position fielding splits (best-position breakdown), most-played first
   byPosition: PlayerPositionSplit[];
 }
@@ -867,14 +869,26 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
     }
   }
   // Record a talent trigger / effect for one of our players (pitch arsenal excluded).
-  const noteTalent = (ownerId: string, talentId: string, kind: 'act' | 'effect', tier = 0) => {
-    if (!isOurs(ownerId) || PITCH_TYPE_IDS.has(talentId) || isPitchSubId(talentId)) return;
+  const talentEntry = (ownerId: string, talentId: string) => {
+    if (!isOurs(ownerId) || PITCH_TYPE_IDS.has(talentId) || isPitchSubId(talentId)) return null;
     const r = row(ownerId);
-    const name = talentNames.get(talentId) ?? talentId;
     const acc = (r.talentActs ??= {});
-    const e = (acc[name] ??= { acts: 0, effects: 0, stacked: 0, maxTier: 0 });
+    const name = talentNames.get(talentId) ?? talentId;
+    return (acc[name] ??= { acts: 0, effects: 0, stacked: 0, maxTier: 0, firedSwings: 0, firedContact: 0 });
+  };
+  const noteTalent = (ownerId: string, talentId: string, kind: 'act' | 'effect', tier = 0) => {
+    const e = talentEntry(ownerId, talentId);
+    if (!e) return;
     if (kind === 'act') e.acts++;
     else { e.effects++; if (tier >= 2) e.stacked++; if (tier > e.maxTier) e.maxTier = tier; }
+  };
+  // A batter-talent fired on a swing — record the swing + whether it made contact,
+  // so we can show "fired N×, contact X%" (the observable effect of contact talents).
+  const noteFired = (ownerId: string, talentId: string, madeContact: boolean) => {
+    const e = talentEntry(ownerId, talentId);
+    if (!e) return;
+    e.firedSwings++;
+    if (madeContact) e.firedContact++;
   };
 
   const matched = ourTeamId === home.id || ourTeamId === away.id;
@@ -984,11 +998,17 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
     const skipFoulFetch = segIsFoul && !segHasOut;
     if (sawPitch && batterId && batterSide === ourSide) row(batterId).pitchesSeen++;
 
+    // Batter talents that fired this pitch (pre-swing) — credited with the swing
+    // outcome below, so contact talents show "fired N×, contact X%".
+    const segFired: string[] = [];
     for (const ev of seg.events ?? []) {
       const pl = ev.payload ?? {};
       switch (ev.type) {
         case 'talent.activated': {
-          if (pl.ownerId && pl.talentId) noteTalent(pl.ownerId, pl.talentId, 'act');
+          if (pl.ownerId && pl.talentId) {
+            noteTalent(pl.ownerId, pl.talentId, 'act');
+            if (pl.ownerId === batterId) segFired.push(pl.talentId);
+          }
           break;
         }
         case 'effect.applied': {
@@ -1000,6 +1020,8 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
             const r = row(batterId);
             r.swings++;
             if (!pl.madeContact) r.whiffs++;
+            // Credit each talent that fired pre-swing with this swing's outcome.
+            for (const tid of segFired) noteFired(batterId, tid, !!pl.madeContact);
           }
           break;
         }
