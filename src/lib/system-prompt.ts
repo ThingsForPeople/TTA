@@ -132,6 +132,13 @@ This is a high-whiff sim. Observed put-away effectiveness (whiff rate / lowest c
 - Batting and fielding talents affect all position players including Two Way pitchers.
 - When recommending talents, always check what the player already has, but decide between leveling up vs. adding new based purely on effectiveness and synergy — not cost.
 
+### Measured talent value (from replay analysis)
+Values MEASURED from replays (activation → outcome), most reliable first — prefer these over intuition where available:
+- **Driver** (line drives) is the strongest zone hitting effect — clear gain in line-drive share and exit velo when it fires. **Dialed** (contact) is a solid, reliable second. **Popper** (fly balls) showed little measured contact-quality gain — do NOT over-rate it (roughly on par with Chopper, below Dialed). **Hacker** (more swings) is double-edged — measured slightly NEGATIVE on contact quality (more grounders, lower EV); recommend it cautiously, mainly for aggressive high-contact hitters.
+- **Mental Warfare** measured the single biggest contact-quality boost of any hitting talent (it raises the pitcher's mistake chance) — high value, best in run-producing (runners-on) slots.
+- CAVEAT: only talents that fire often enough were measurable. Always-on talents, charge/escalation builders (e.g. Pressure Cooker, Knowledge is Power), and ALL fielding talents can't yet be measured from replays — judge those on their engine mechanism, not a measured value, and say so.
+- If the app provides a player's ACTUAL talent usage (e.g. "fires N/game, X% contact when fired"), use it: a talent already firing often and converting is pulling its weight (adding a redundant one has less value); a rarely-firing talent may be situational or a poor fit.
+
 ## Hitting zone grid & overlap
 The strike zone is a 3×3 grid. Hitting zone talents are "{Direction} {Effect}" where Direction is High/Low (a full row, 3 cells), Inside/Outside (a full column, 3 cells), and Effect is Dialed (contact), Driver (line drives), Chopper (grounders), Popper (fly balls), or Hacker (swing speed). Each talent applies its effect to its 3 cells.
 - Rows (High/Low) are absolute. Columns (Inside/Outside) are RELATIVE to the batter and flip with handedness — Inside is the column closest to the batter. For a RH batter, Inside is the left column (catcher's view); for a LH batter it's the right column. Always account for the player's batting hand when reasoning about Inside/Outside.
