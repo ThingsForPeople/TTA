@@ -139,10 +139,14 @@ export const ENGINE_STAT_GLOSSARY: Record<EngineStat, string> = {
  */
 export type ZoneHitEffect = 'Dialed' | 'Driver' | 'Chopper' | 'Popper' | 'Hacker';
 export const ZONE_HIT_EFFECT: Record<ZoneHitEffect, { engineStat: EngineStat; rank: number; note: string }> = {
-  Driver: { engineStat: "line_drive_chance", rank: 5, note: "line drives -- the highest-value batted ball" },
+  Driver: { engineStat: "line_drive_chance", rank: 5, note: "line drives -- the highest-value batted ball (replay-confirmed: +~0.3 line-drive share, +1-3 EV when active)" },
   Dialed: { engineStat: "contact_chance", rank: 4, note: "cleaner contact within the zone" },
-  Popper: { engineStat: "fly_ball_chance", rank: 3, note: "fly balls -- power/HR upside but also outs" },
+  // Popper demoted 3->2 (2026-06-29 replay analysis): when active it shows no
+  // measurable EV gain and only a weak fly-ball shift -- not the clear upgrade
+  // over Chopper the old rank implied. HR upside keeps it level with, not above,
+  // Chopper. (Ties are fine; rank only scales a small batting-order tiebreaker.)
+  Popper: { engineStat: "fly_ball_chance", rank: 2, note: "fly balls -- some HR upside, but replay shows little contact-quality gain" },
   Chopper: { engineStat: "grounder_chance", rank: 2, note: "ground balls -- situational, rewards speed" },
-  Hacker: { engineStat: "swing_chance", rank: 1, note: "more swings -- aggression, double-edged" },
+  Hacker: { engineStat: "swing_chance", rank: 1, note: "more swings -- aggression, double-edged (replay: -1 to -2.6 EV, more grounders)" },
 };
 

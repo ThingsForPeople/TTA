@@ -28,8 +28,8 @@ function effImp(pi: PositionImportance): number {
   return DEFAULT_POSITION_IMPORTANCE[pi.position] ?? 1;
 }
 
-type View = 'fielding' | 'batting' | 'positions' | 'alignment' | 'heatmap';
-const VIEW_LABEL: Record<View, string> = { fielding: 'fielding', batting: 'batting', positions: 'by position', alignment: 'best alignment', heatmap: 'heat map' };
+type View = 'fielding' | 'positions' | 'alignment' | 'heatmap' | 'talents';
+const VIEW_LABEL: Record<View, string> = { fielding: 'fielding', positions: 'by position', alignment: 'best alignment', heatmap: 'heat map', talents: 'talents' };
 
 // Fielded-ball heat bin (mirrors the route's HeatBin). x,y are integer field
 // coords (origin = home plate, +x = RF side, −y = deeper).
@@ -313,20 +313,9 @@ const FIELDING_COLS: Column[] = [
   { key: 'releaseAvg', label: 'Rel', title: 'Avg release time (lower = quicker)', get: (p) => p.releaseAvg, fmt: (v) => (v == null ? '·' : v.toFixed(2)) },
   { key: 'closePlays', label: 'Tough', title: 'Difficult plays converted', get: (p) => p.closePlays, fmt: int },
   { key: 'dp', label: 'DP', title: 'Double plays turned (any role: started / pivoted / finished), summed across games', get: (p) => p.dp, fmt: int },
+  { key: 'dpOpp', label: 'DPo', title: 'DP opportunities — infield grounders fielded with a runner on 1st and < 2 outs. DP ÷ DPo ≈ turn rate (small per-player samples — read loosely).', get: (p) => p.dpOpp, fmt: int },
   { key: 'caughtStealing', label: 'CS', title: 'Runners caught stealing (catcher) — attempts & rate shown in insights', get: (p) => p.caughtStealing, fmt: int },
-];
-
-const BATTING_COLS: Column[] = [
-  { key: 'pa', label: 'PA', get: (p) => p.pa, fmt: int },
-  { key: 'avg', label: 'AVG', get: (p) => p.avg, fmt: rate3 },
-  { key: 'obp', label: 'OBP', get: (p) => p.obp, fmt: rate3 },
-  { key: 'kRate', label: 'K%', get: (p) => p.kRate, fmt: (v) => (v == null ? '·' : Math.round(v * 100) + '%') },
-  { key: 'bbRate', label: 'BB%', get: (p) => p.bbRate, fmt: (v) => (v == null ? '·' : Math.round(v * 100) + '%') },
-  { key: 'avgEV', label: 'Avg EV', get: (p) => p.avgEV, fmt: num1 },
-  { key: 'maxEV', label: 'Max EV', get: (p) => p.maxEV, fmt: num1 },
-  { key: 'sweetSpotRate', label: 'Sweet%', title: 'Launch angle 8–32°', get: (p) => p.sweetSpotRate, fmt: (v) => (v == null ? '·' : Math.round(v * 100) + '%') },
-  { key: 'whiffRate', label: 'Whiff%', get: (p) => p.whiffRate, fmt: (v) => (v == null ? '·' : Math.round(v * 100) + '%') },
-  { key: 'chases', label: 'Chase', title: 'Swings out of zone', get: (p) => p.chases, fmt: int },
+  { key: 'basesSaved', label: 'BsSv', title: 'Bases saved (outfield) — extra-base suppression: bases held below the ball’s expected total over balls the OF retrieved (ground balls already through for a hit). Positive = held hits short. The OF value PAE can’t see; re-sync to populate.', get: (p) => p.basesSaved, fmt: signed1 },
 ];
 
 // A per-position split is "rankable" (eligible to be flagged best) only with
@@ -512,6 +501,101 @@ function HeatMaps({ heatBins, sprayBins }: { heatBins: HeatBin[]; sprayBins: Spr
   );
 }
 
+// Cross-game talent usage. One flat, sortable, filterable table (a player
+// dropdown + a talent search) instead of a per-player wall — so you can find
+// e.g. "waste" for one player, or sort by Fires/g to see what's most active.
+// Shows how OFTEN each talent triggers; the replay doesn't expose in-game stack
+// depth (tier = talent level), so there's no "stacking" column.
+type TalentRow = { player: string; playerId: string; games: number; name: string; acts: number; perPA: number | null; maxTier: number; firedSwings: number; contactPct: number | null };
+type TalentSort = 'perPA' | 'acts' | 'maxTier' | 'name' | 'player' | 'contactPct';
+
+function TalentView({ players }: { players: AggregatedPlayer[] }) {
+  const [playerId, setPlayerId] = useState('all');
+  const [q, setQ] = useState('');
+  const [sortKey, setSortKey] = useState<TalentSort>('perPA');
+  const [dir, setDir] = useState<'asc' | 'desc'>('desc');
+
+  const withTalents = players.filter((p) => (p.talents?.length ?? 0) > 0);
+  if (withTalents.length === 0) {
+    return (
+      <p className="text-sm text-slate-400">
+        No talent data yet — run <span className="text-emerald-300">Clear &amp; re-sync</span> to capture talent triggering from replays.
+      </p>
+    );
+  }
+
+  const needle = q.trim().toLowerCase();
+  let rows: TalentRow[] = withTalents
+    .filter((p) => playerId === 'all' || p.playerId === playerId)
+    .flatMap((p) => p.talents.map((t) => ({ player: p.name, playerId: p.playerId, games: p.games, name: t.name, acts: t.acts, perPA: p.pa > 0 ? t.acts / p.pa : null, maxTier: t.maxTier, firedSwings: t.firedSwings, contactPct: t.firedSwings > 0 ? t.firedContact / t.firedSwings : null })));
+  if (needle) rows = rows.filter((r) => r.name.toLowerCase().includes(needle));
+  rows.sort((a, b) => {
+    const s = dir === 'asc' ? 1 : -1;
+    if (sortKey === 'name') return s * a.name.localeCompare(b.name);
+    if (sortKey === 'player') return s * a.player.localeCompare(b.player) || a.name.localeCompare(b.name);
+    if (sortKey === 'contactPct') return s * ((a.contactPct ?? -1) - (b.contactPct ?? -1));
+    if (sortKey === 'perPA') return s * ((a.perPA ?? -1) - (b.perPA ?? -1));
+    return s * ((a[sortKey] as number) - (b[sortKey] as number));
+  });
+
+  const showPlayer = playerId === 'all';
+  const toggle = (k: TalentSort) => {
+    if (sortKey === k) setDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(k); setDir(k === 'name' || k === 'player' ? 'asc' : 'desc'); }
+  };
+  const arrow = (k: TalentSort) => (sortKey === k ? (dir === 'asc' ? ' ▲' : ' ▼') : '');
+  const Th = ({ k, label, title, num }: { k: TalentSort; label: string; title?: string; num?: boolean }) => (
+    <th title={title} onClick={() => toggle(k)} className={'cursor-pointer select-none px-1.5 py-1 hover:text-slate-300 ' + (num ? 'text-right' : 'text-left')}>{label}{arrow(k)}</th>
+  );
+
+  return (
+    <div>
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+        <select value={playerId} onChange={(e) => setPlayerId(e.target.value)} className="rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-slate-300">
+          <option value="all">All players</option>
+          {withTalents.map((p) => <option key={p.playerId} value={p.playerId}>{p.name}</option>)}
+        </select>
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="filter talent…"
+          className="rounded border border-slate-700 bg-slate-950 px-2 py-0.5 text-slate-300 placeholder:text-slate-600"
+        />
+        <span className="text-slate-500">{rows.length} row{rows.length === 1 ? '' : 's'}</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-xs">
+          <thead>
+            <tr className="border-b border-slate-800 text-[10px] uppercase tracking-wider text-slate-500">
+              {showPlayer && <Th k="player" label="Player" />}
+              <Th k="name" label="Talent" />
+              <Th k="perPA" label="Fires/PA" title="Triggers per plate appearance — slot-independent. (Per-GAME would scale with lineup slot: a leadoff hitter gets more PAs/game than the 9-hole, so per-PA is the fair rate.)" num />
+              <Th k="acts" label="Total" title="Total triggers across the games in view" num />
+              <Th k="contactPct" label="Contact%" title="For batting talents that fire pre-swing: contact rate on the swings where this talent fired. Observational (the talent fires in specific situations), not a controlled A/B — but it's the direct readout of a contact talent doing its job." num />
+              <Th k="maxTier" label="Lvl" title="Talent level (from the roster). NOT an in-game stack — the replay doesn't expose per-game stack depth." num />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={r.playerId + '|' + r.name + i} className="border-b border-slate-800/60 text-slate-300 last:border-0">
+                {showPlayer && <td className="px-1.5 py-1 whitespace-nowrap text-slate-400">{r.player}</td>}
+                <td className="px-1.5 py-1 whitespace-nowrap">{r.name}</td>
+                <td className="px-1.5 py-1 text-right font-mono">{r.perPA != null ? r.perPA.toFixed(2) : '·'}</td>
+                <td className="px-1.5 py-1 text-right font-mono text-slate-500">{r.acts}</td>
+                <td className="px-1.5 py-1 text-right font-mono" title={r.contactPct != null ? `contact rate on ${r.firedSwings} swings where it fired` : ''}>{r.contactPct != null ? Math.round(r.contactPct * 100) + '%' : '·'}</td>
+                <td className="px-1.5 py-1 text-right font-mono text-slate-500">{r.maxTier > 0 ? r.maxTier : '·'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-[10px] text-slate-600">
+        <strong>Fires/PA</strong> = triggers per plate appearance — slot-independent (per-game would scale with lineup slot, since a leadoff hitter gets more PAs/game). <strong>Contact%</strong> = contact rate on the swings where a batting talent fired (observational — situational, not a controlled test — but the direct readout of a contact talent working). <strong>Lvl</strong> = talent level, not an in-game stack (the replay doesn’t record stack depth). Pitch arsenal excluded; re-sync to refresh. Pick a player or type to filter; click a header to sort.
+      </p>
+    </div>
+  );
+}
+
 export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
   const [players, setPlayers] = useState<AggregatedPlayer[]>([]);
   const [posImp, setPosImp] = useState<PositionImportance[]>([]);
@@ -648,7 +732,7 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
     }
   }, [posImp, teamUuid, onDataChange, derivedStatWeights]);
 
-  const cols = view === 'fielding' ? FIELDING_COLS : BATTING_COLS;
+  const cols = FIELDING_COLS;
 
   const sorted = useMemo(() => {
     const col = cols.find((c) => c.key === sortKey);
@@ -701,8 +785,8 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
 
   return (
     <CollapsiblePanel
-      title="Advanced stats"
-      subtitle="Fielding & contact metrics derived from game replays — not exposed by the public stat API. Sync processes the most-recent 100 games (older stored games are pruned)."
+      title="Advanced fielding"
+      subtitle="Fielding metrics derived from game replays — not exposed by the public stat API. Sync processes the most-recent 100 games (older stored games are pruned) and also feeds Advanced batting in the Batting section."
       headerAction={
         <div className="flex items-center gap-1.5">
           <button
@@ -748,7 +832,7 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
           {/* Controls */}
           <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
             <div className="flex rounded border border-slate-700">
-              {(['fielding', 'batting', 'positions', 'alignment', 'heatmap'] as const).map((v) => (
+              {(['fielding', 'positions', 'alignment', 'heatmap', 'talents'] as const).map((v) => (
                 <button
                   key={v}
                   type="button"
@@ -901,6 +985,8 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
             <BestAlignment players={players} posImp={posImp} />
           ) : view === 'heatmap' ? (
             <HeatMaps heatBins={heatBins} sprayBins={sprayBins} />
+          ) : view === 'talents' ? (
+            <TalentView players={players} />
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-xs">

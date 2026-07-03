@@ -257,6 +257,9 @@ function buildSplits(byPos: Map<number, { games: number; sum: Sums }>): PlayerPo
       stealAttempts: s.stealAttempts,
       caughtStealing: s.caughtStealing,
       dp: s.dpInvolved,
+      dpOpp: s.dpOpp,
+      basesSaved: Math.round(s.basesSavedSum * 100) / 100,
+      basesSavedOpps: s.basesSavedOpps,
     });
   }
   // Most-played first (tie-break by chances), so [0] is the primary position.
@@ -358,16 +361,27 @@ function applyGameContext(rows: { gameId: string; position: number | null; metri
 }
 
 function aggregate(rows: { playerId: string; playerName: string; position: number | null; metrics: PlayerGameMetrics }[]): AggregatedPlayer[] {
-  const acc = new Map<string, { name: string; games: number; sum: Sums; maxEV: number; armMax: number; byPos: Map<number, { games: number; sum: Sums }> }>();
+  type TStat = { acts: number; effects: number; stacked: number; maxTier: number; firedSwings: number; firedContact: number };
+  const acc = new Map<string, { name: string; games: number; sum: Sums; maxEV: number; armMax: number; byPos: Map<number, { games: number; sum: Sums }>; talents: Map<string, TStat> }>();
   for (const r of rows) {
     const m = r.metrics;
     let a = acc.get(r.playerId);
     if (!a) {
-      a = { name: r.playerName, games: 0, sum: zeroSums(), maxEV: 0, armMax: 0, byPos: new Map() };
+      a = { name: r.playerName, games: 0, sum: zeroSums(), maxEV: 0, armMax: 0, byPos: new Map(), talents: new Map() };
       acc.set(r.playerId, a);
     }
     a.games++;
     for (const k of NUMERIC_KEYS) a.sum[k] += (m[k] as number) ?? 0;
+    // Accumulate per-talent triggering + stacking across games.
+    if (m.talentActs) {
+      for (const [nm, v] of Object.entries(m.talentActs)) {
+        const e = a.talents.get(nm) ?? { acts: 0, effects: 0, stacked: 0, maxTier: 0, firedSwings: 0, firedContact: 0 };
+        e.acts += v.acts ?? 0; e.effects += v.effects ?? 0; e.stacked += v.stacked ?? 0;
+        e.maxTier = Math.max(e.maxTier, v.maxTier ?? 0);
+        e.firedSwings += v.firedSwings ?? 0; e.firedContact += v.firedContact ?? 0;
+        a.talents.set(nm, e);
+      }
+    }
     a.maxEV = Math.max(a.maxEV, m.evMax ?? 0);
     a.armMax = Math.max(a.armMax, m.throwSpeedMax ?? 0);
     // Per-position split: only count a game toward a position if the player
@@ -376,7 +390,7 @@ function aggregate(rows: { playerId: string; playerName: string; position: numbe
     // chances, so this gate would collapse its game count to "games with a
     // steal attempt" — badly under-reporting games CAUGHT. Count any game the
     // player was the catcher; steal-relevant counts live in their own columns.
-    const fieldedHere = r.position === 2 || m.chances > 0 || m.putouts > 0 || m.assists > 0 || m.stealAttempts > 0;
+    const fieldedHere = r.position === 2 || m.chances > 0 || m.putouts > 0 || m.assists > 0 || m.stealAttempts > 0 || m.basesSavedOpps > 0;
     if (r.position != null && fieldedHere) {
       let bp = a.byPos.get(r.position);
       if (!bp) { bp = { games: 0, sum: zeroSums() }; a.byPos.set(r.position, bp); }
@@ -400,6 +414,10 @@ function aggregate(rows: { playerId: string; playerName: string; position: numbe
       avgEV: s.evCount ? Math.round((s.evSum / s.evCount) * 10) / 10 : null,
       maxEV: a.maxEV || null,
       sweetSpotRate: s.bip ? Math.round((s.sweetSpot / s.bip) * 1000) / 1000 : null,
+      xwobaCon: s.bip ? Math.round((s.xwobaConSum / s.bip) * 1000) / 1000 : null,
+      wobaCon: s.bip
+        ? Math.round(((0.89 * (s.hits - s.doubles - s.triples - s.hr) + 1.27 * s.doubles + 1.62 * s.triples + 2.10 * s.hr) / s.bip) * 1000) / 1000
+        : null,
       bbMix: { ground: s.ground, line: s.line, fly: s.fly, popup: s.popup },
       swings: s.swings, whiffs: s.whiffs, chases: s.chases,
       whiffRate: s.swings ? Math.round((s.whiffs / s.swings) * 1000) / 1000 : null,
@@ -412,10 +430,16 @@ function aggregate(rows: { playerId: string; playerName: string; position: numbe
       releaseAvg: s.releaseCount ? Math.round((s.releaseSum / s.releaseCount) * 1000) / 1000 : null,
       pae: Math.round((s.engagedOuts - s.expectedOuts) * 10) / 10,
       expectedOuts: Math.round(s.expectedOuts * 10) / 10,
+      basesSaved: s.basesSavedOpps > 0 ? Math.round(s.basesSavedSum * 100) / 100 : null,
+      basesSavedPerGame: s.basesSavedOpps > 0 && a.games > 0 ? Math.round((s.basesSavedSum / a.games) * 100) / 100 : null,
+      basesSavedOpps: s.basesSavedOpps,
       stealAttempts: s.stealAttempts,
       caughtStealing: s.caughtStealing,
       csRate: s.stealAttempts > 0 ? Math.round((s.caughtStealing / s.stealAttempts) * 1000) / 1000 : null,
-      dp: s.dpInvolved, dpStarted: s.dpStarted, dpTurned: s.dpTurned, dpFinished: s.dpFinished,
+      dp: s.dpInvolved, dpStarted: s.dpStarted, dpTurned: s.dpTurned, dpFinished: s.dpFinished, dpOpp: s.dpOpp,
+      talents: [...a.talents.entries()]
+        .map(([name, v]) => ({ name, acts: v.acts, effects: v.effects, stacked: v.stacked, maxTier: v.maxTier, firedSwings: v.firedSwings, firedContact: v.firedContact, perGame: a.games > 0 ? Math.round((v.acts / a.games) * 10) / 10 : 0 }))
+        .sort((x, y) => y.acts - x.acts),
       byPosition,
     });
   }
@@ -425,12 +449,12 @@ function aggregate(rows: { playerId: string; playerName: string; position: numbe
 
 const NUMERIC_KEYS: (keyof PlayerGameMetrics)[] = [
   'pa', 'ab', 'hits', 'doubles', 'triples', 'hr', 'k', 'bb', 'bip',
-  'evSum', 'evCount', 'sweetSpot', 'ground', 'line', 'fly', 'popup',
+  'evSum', 'evCount', 'sweetSpot', 'xwobaConSum', 'ground', 'line', 'fly', 'popup',
   'swings', 'whiffs', 'chases', 'pitchesSeen',
   'putouts', 'assists', 'fieldErrors', 'chances', 'closePlays',
   'rangeSum', 'rangeCount', 'throwSpeedSum', 'throwSpeedCount', 'releaseSum', 'releaseCount',
-  'expectedOuts', 'engagedOuts', 'leverageSum', 'stealAttempts', 'caughtStealing',
-  'dpInvolved', 'dpStarted', 'dpTurned', 'dpFinished',
+  'expectedOuts', 'engagedOuts', 'leverageSum', 'basesSavedSum', 'basesSavedOpps', 'stealAttempts', 'caughtStealing',
+  'dpInvolved', 'dpStarted', 'dpTurned', 'dpFinished', 'dpOpp',
 ];
 
 // GET — aggregated advanced stats across stored replay metrics.

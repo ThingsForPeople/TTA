@@ -178,6 +178,32 @@ export function TalentAdvisor({ players, metaStore, buildContext, buildCompactCo
   const abortRef = useRef<AbortController | null>(null);
   const [rateLimit, updateRateLimit] = useRateLimit();
 
+  // Per-player replay talent usage (Fires/g + contact when fired), keyed by
+  // player uuid, so the advice can weigh how the player's current talents
+  // actually perform. Empty until replays are synced.
+  const [talentUsage, setTalentUsage] = useState<Record<string, { name: string; perPA: number | null; firedSwings: number; firedContact: number }[]>>({});
+  useEffect(() => {
+    if (!teamUuid) return;
+    let cancelled = false;
+    fetch(`/api/team/${teamUuid}/replay-metrics`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json) => {
+        if (cancelled || !json?.players) return;
+        const map: Record<string, { name: string; perPA: number | null; firedSwings: number; firedContact: number }[]> = {};
+        // Normalize per plate appearance, not per game — per-game is confounded by
+        // lineup slot (leadoff gets more PAs than the 9-hole).
+        for (const p of json.players) {
+          if (!p.talents?.length) continue;
+          map[p.playerId] = p.talents.map((t: { name: string; acts: number; firedSwings: number; firedContact: number }) => ({
+            name: t.name, perPA: p.pa > 0 ? t.acts / p.pa : null, firedSwings: t.firedSwings, firedContact: t.firedContact,
+          }));
+        }
+        setTalentUsage(map);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [teamUuid]);
+
   const player = players.find((p) => p.uuid === selectedPlayer);
   const meta = selectedPlayer ? metaStore[selectedPlayer] : undefined;
   const pitchTypes = meta?.pitchTalents?.map((pt) => pt.pitch) ?? [];
@@ -217,6 +243,14 @@ export function TalentAdvisor({ players, metaStore, buildContext, buildCompactCo
         lines.push(`Pitch repertoire: ${pitchDescs.join('; ')}`);
       }
     }
+    const usage = player.uuid ? talentUsage[player.uuid] : undefined;
+    if (usage && usage.length) {
+      const top = [...usage]
+        .sort((a, b) => (b.perPA ?? -1) - (a.perPA ?? -1))
+        .slice(0, 12)
+        .map((t) => `${t.name}${t.perPA != null ? ` ${t.perPA.toFixed(2)}/PA` : ''}` + (t.firedSwings > 0 ? ` (${Math.round((t.firedContact / t.firedSwings) * 100)}% contact when it fired)` : ''));
+      lines.push(`Actual usage of this player's current talents (recent synced games — triggers per plate appearance, slot-independent, and contact rate on swings where a batting talent fired): ${top.join('; ')}`);
+    }
     const existingTalentLevels = new Map<string, number>();
     for (const t of meta?.talents ?? []) {
       existingTalentLevels.set(t.toLowerCase(), meta?.talentLevels?.[t] ?? 1);
@@ -255,7 +289,7 @@ export function TalentAdvisor({ players, metaStore, buildContext, buildCompactCo
       'If no talents are genuine improvements then suggest that I pick one and reroll it.'
     );
     return lines.join('\n');
-  }, [player, meta, filledOptions]);
+  }, [player, meta, filledOptions, talentUsage]);
 
   const analyze = useCallback(async () => {
     abortRef.current?.abort();

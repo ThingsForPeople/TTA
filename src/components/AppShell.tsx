@@ -17,6 +17,7 @@ import { TimeRangeFilter } from './TimeRangeFilter';
 import { ModeBreakdown } from './ModeBreakdown';
 import { TrainingPanel } from './TrainingPanel';
 import { AdvancedStatsPanel } from './AdvancedStatsPanel';
+import { AdvancedBattingPanel } from './AdvancedBattingPanel';
 import { Matchups } from './Matchups';
 
 type Tab = 'overview' | 'stats' | 'roster' | 'tools' | 'matchups' | 'debug';
@@ -29,6 +30,20 @@ const TABS: { value: Tab; label: string; devOnly?: boolean }[] = [
   { value: 'matchups', label: 'Matchups' },
   { value: 'debug', label: 'Debug', devOnly: true },
 ];
+
+// Light group header for the Stats tab — labels a cluster of related panels
+// (each panel still renders its own chrome) so the tab reads as Batting /
+// Pitching / Defense / Games rather than one flat stack.
+function StatsSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="space-y-4">
+      <h2 className="border-b border-slate-800 pb-1 text-xs font-semibold uppercase tracking-widest text-slate-500">
+        {title}
+      </h2>
+      {children}
+    </section>
+  );
+}
 
 interface Props {
   team: Team;
@@ -166,16 +181,25 @@ export function AppShell({
         <div className={tab === 'overview' ? 'space-y-4' : 'hidden'}>
           <OptimalBattingOrder team={team} metaStore={metaStore} />
           <FieldPositionsPanel team={team} metaStore={metaStore} teamUuid={uuid} dataVersion={replayDataVersion} onNavigateToRoster={() => setTab('roster')} />
-          <PositionGuidancePanel />
           <InsightsPanel buildContext={buildAdviseContext} buildCompactContext={buildCompactContext} buildInsights={buildInsights} teamUuid={uuid} />
         </div>
 
-        <div className={tab === 'stats' ? 'space-y-4' : 'hidden'}>
-          <StatsTable team={team} />
-          <PitcherCard pitcher={team.pitcher} />
-          <RecentGamesPanel team={team} />
-          <ModeBreakdown teamUuid={uuid} time={time} />
-          <AdvancedStatsPanel teamUuid={uuid} onDataChange={() => setReplayDataVersion((v) => v + 1)} />
+        <div className={tab === 'stats' ? 'space-y-6' : 'hidden'}>
+          <StatsSection title="Batting">
+            <StatsTable team={team} />
+            <AdvancedBattingPanel teamUuid={uuid} dataVersion={replayDataVersion} />
+          </StatsSection>
+          <StatsSection title="Pitching">
+            <PitcherCard pitcher={team.pitcher} />
+          </StatsSection>
+          <StatsSection title="Defense">
+            <AdvancedStatsPanel teamUuid={uuid} onDataChange={() => setReplayDataVersion((v) => v + 1)} />
+            <PositionGuidancePanel />
+          </StatsSection>
+          <StatsSection title="Games">
+            <RecentGamesPanel team={team} />
+            <ModeBreakdown teamUuid={uuid} time={time} />
+          </StatsSection>
         </div>
 
         <div className={tab === 'roster' ? 'space-y-4' : 'hidden'}>

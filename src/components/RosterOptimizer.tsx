@@ -322,7 +322,7 @@ export function FieldPositionsPanel({ team, metaStore, teamUuid, dataVersion = 0
       title="Optimal field positions"
       subtitle={
         fieldingGrades
-          ? `Top lineups by team fit, now informed by real fielding from ${gradeGames} synced game${gradeGames === 1 ? '' : 's'} (the "def" chips). Switch options to explore alternatives.`
+          ? `Top lineups by team fit, now informed by real fielding from ${gradeGames} synced game${gradeGames === 1 ? '' : 's'} (the "def" chips). Switch options to explore alternatives. For the replay-only view, see "best alignment" under Stats → Defense.`
           : 'Top lineups by team fit — switch options to explore close alternatives. Per-row fit = weighted sim stats (120+ great, 80+ good, 40+ OK). Sync replays on the Stats tab to fold in real defense.'
       }
       headerAction={
@@ -485,9 +485,10 @@ export function OptimalBattingOrder({ team, metaStore }: Props) {
     <CollapsiblePanel
       title="Recommended batting order"
       subtitle={
-        mode === 'stat'
-          ? 'Stat-heavy: pure wOBA + role-based slot scoring; talents and slot-locks ignored. ▲ moved up · ▼ moved down from current slot.'
-          : 'Talent-heavy: slot-affinity talents + locks drive placement; wOBA only overrides on a clear gap. ▲ moved up · ▼ moved down from current slot.'
+        (mode === 'stat'
+          ? 'Stat-heavy: wOBA + role-based slot scoring, then refined to maximize expected runs (lineup sim). Talents and slot-locks ignored. ▲ moved up · ▼ moved down from current slot.'
+          : 'Talent-heavy: slot-affinity talents + locks drive placement; wOBA only overrides on a clear gap. ▲ moved up · ▼ moved down from current slot.')
+        + (displayOrder.expectedRuns != null ? ` ~${displayOrder.expectedRuns} expected runs/game.` : '')
       }
       headerAction={
         <div className="flex rounded border border-slate-700 text-xs">
