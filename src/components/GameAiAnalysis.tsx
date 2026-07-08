@@ -4,12 +4,13 @@ import { Markdown } from './Markdown';
 // Default prompt for a SINGLE game. A multi-game caller can pass its own
 // trends-oriented prompt via the `prompt` prop.
 export const GAME_EVAL_PROMPT =
-  'Evaluate this game for my team. Be concrete and reference player names + the numbers above.\n\n' +
+  'Evaluate this matchup sim for my team. Be concrete and reference player names + the numbers above. ' +
+  'This is a re-simulation of the matchup, not the recorded game — read it for process and tendencies.\n\n' +
   '1. WHAT WENT RIGHT — the 2-3 biggest positives. Favor PROCESS over results: hard contact, ' +
   'whiff-inducing pitches, strong defense, productive at-bats.\n' +
   '2. WHAT WENT WRONG — the 2-3 biggest negatives: chases/whiffs, mistake pitches that got hit, ' +
   'misplays, or hard contact allowed.\n' +
-  '3. PROCESS vs RESULT — call out where the box score lies: our hard-hit balls that were caught ' +
+  '3. PROCESS vs RESULT — call out where the sim\'s line lies: our hard-hit balls that were caught ' +
   '(unlucky) or weak contact that fell in (lucky), so I don\'t over-react to the final line.\n' +
   '4. ONE TAKEAWAY — the single most useful adjustment, if any.\n\n' +
   'CRITICAL CONSTRAINT — the ONLY two things I can change between games are (a) the BATTING ORDER ' +
@@ -43,7 +44,7 @@ export function GameAiAnalysis({
   prompt = GAME_EVAL_PROMPT,
   title = 'AI game analysis',
   actionType = 'game-analysis',
-  hint = 'Send this game’s data to the AI for a what-went-right / what-went-wrong read.',
+  hint = 'Send this sim’s data to the AI for a what-went-right / what-went-wrong read.',
 }: Props) {
   const [content, setContent] = useState<string | null>(null);
   const [status, setStatus] = useState<'idle' | 'preparing' | 'streaming' | 'done' | 'error'>('idle');

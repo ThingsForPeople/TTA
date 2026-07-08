@@ -66,15 +66,15 @@ function profile(p: Player): PlayerProfile | undefined {
 
   // Regress small samples toward league-average so a 3-for-5 start doesn't
   // outrank a proven hitter. Full weight at RELIABLE_PA.
-  // NOTE (2026-06-29): Tiny Teams is a HIGH-offense sim — measured league
-  // ≈ .444 wOBA / .428 OBP across all teams (docs/offense-hitting-findings.md),
-  // not the ~.320 of real MLB. The old .320 anchors dragged every low-PA hitter
-  // down ~.12, systematically under-rating small-sample players. These match
-  // the sim environment (same raw-linear-weights/PA scale as `woba` above).
+  // NOTE (2026-07-08): the July 2026 game patch massively rebalanced offense
+  // (league AVG .397→.307, K% 33→39, runs/g nearly halved). Anchors re-measured
+  // from 34 post-patch box scores / 2587 PA: .352 wOBA / .320 OBP (same
+  // raw-linear-weights/PA scale as `woba` above). Pre-patch values were
+  // .440/.430 — do not revert to them. Refit as more post-patch data lands.
   // TODO: derive from the team/league population at runtime for self-calibration.
   const confidence = Math.min(pa / RELIABLE_PA, 1);
-  const LEAGUE_AVG_WOBA = 0.440;
-  const LEAGUE_AVG_OBP = 0.430;
+  const LEAGUE_AVG_WOBA = 0.352;
+  const LEAGUE_AVG_OBP = 0.320;
   const regressedWoba = confidence * woba + (1 - confidence) * LEAGUE_AVG_WOBA;
   const rawObp = b.obp ?? (pa > 0 ? ((b.h ?? 0) + bb) / pa : 0);
   const regressedObp = confidence * rawObp + (1 - confidence) * LEAGUE_AVG_OBP;
@@ -399,7 +399,10 @@ function mulberry32(seed: number): () => number {
 }
 
 interface BatterRates { out: number; bb: number; b1: number; b2: number; b3: number; hr: number }
-const LEAGUE_RATES: BatterRates = { out: 0.50, bb: 0.08, b1: 0.24, b2: 0.09, b3: 0.02, hr: 0.07 };
+// Re-measured 2026-07-08 from post-patch box scores (34 games / 2587 PA) after
+// the offense rebalance. Triples are near-extinct post-patch (measured 0.000);
+// a small floor keeps the Monte-Carlo from treating them as impossible.
+const LEAGUE_RATES: BatterRates = { out: 0.68, bb: 0.020, b1: 0.185, b2: 0.084, b3: 0.003, hr: 0.032 };
 
 // Per-batter PA outcome probabilities from box stats, regressed toward league
 // for small samples (same confidence ramp as profile()).

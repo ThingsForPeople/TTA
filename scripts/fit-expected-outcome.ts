@@ -37,8 +37,19 @@ function ingest(raw: any) {
   }
 }
 async function main() {
-  const ids = await enumerate();
-  for (const id of ids) { const raw = await fetchReplay(id); if (raw) ingest(raw); await sleep(800); }
+  // REPLAY_DIR mode: fit from locally harvested replay JSON files instead of
+  // fetching (harvest once, fit many — the endpoint 429s aggressive walks).
+  const dir = process.env.REPLAY_DIR;
+  if (dir) {
+    const fs = await import('fs');
+    const path = await import('path');
+    for (const f of fs.readdirSync(dir).filter((f) => f.endsWith('.json'))) {
+      ingest(JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')));
+    }
+  } else {
+    const ids = await enumerate();
+    for (const id of ids) { const raw = await fetchReplay(id); if (raw) ingest(raw); await sleep(800); }
+  }
   const laB = (la: number) => la < 0 ? 0 : la < 10 ? 1 : la < 20 ? 2 : la < 30 ? 3 : la < 40 ? 4 : la < 55 ? 5 : 6;
   const sorted = balls.map((b) => b.ev).sort((a, b) => a - b);
   const q = (p: number) => sorted[Math.floor(p * sorted.length)];

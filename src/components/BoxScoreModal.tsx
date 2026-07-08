@@ -138,7 +138,7 @@ export function BoxScoreModal({ teamUuid, gameId, onClose }: Props) {
                   (tab === t ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:text-slate-200')
                 }
               >
-                {t === 'box' ? 'Box Score' : 'Replay Analysis'}
+                {t === 'box' ? 'Box Score' : 'Sim Analysis'}
               </button>
             ))}
           </div>

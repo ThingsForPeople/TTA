@@ -68,7 +68,7 @@ Each player has 7 stats (0–100):
 - FLD (Fielding): Fielding chance + throw exchange speed
 - ARM (Arm): Fielder and pitching throw speed
 - PIT (Pitching): Pitching accuracy and movement (pitchers only)
-- STA (Stamina): Energy recovery only — no in-game simulation impact. Higher STA = faster energy regen for training.
+- STA (Stamina): Energy economy only — no in-game simulation impact. Higher STA = less energy spent during training, more energy recovered when resting, so it supports heavier training loads and lowers injury risk indirectly.
 
 ## Engine levers (observed from replay data)
 Beneath the 7 sim stats, the simulation rolls against these internal "levers". Talents and sim stats ultimately push on them. This tells you WHICH lever something moves and the direction — NOT the magnitude (unknown). Use these names when explaining WHY a talent or stat helps; never attach a number to them.
@@ -77,6 +77,7 @@ ${buildEngineLevers()}
 
 ## Positions & defensive fit
 Position scoring is based on weighted sim stats. Recalibrated 2026 from replay OUTCOME data: **FLD — not ARM — is the strongest predictor of converting plays across the infield** (FLD↔plays-above-expected ≈ .9 at SS/2B/3B; ARM has ~0 marginal effect on out conversion once overall quality is controlled). ARM's infield value is real but lives in DP turns / throw margin / runner deterrence, which the data can't directly score — so treat infield ARM as a tiebreaker prior, not the top stat. Outfield outs are won by range (SPD).
+PATCH NOTE (July 2026): the patch buffed fielding across the board (league errors/game fell ~4×; outfielders now convert ~100% of balls they REACH). Differences between fielders now show up less in botched plays and more in RANGE — balls a slower/worse fielder never gets to (which drop for hits/extra bases and don't appear as chances). So weight SPD/range even more for OF, and treat small PAE gaps as weak evidence post-patch.
 - SS: FLD primary (converting plays — the strongest validated signal). SPD for range. ARM moderate (long throw from the hole + DP relay) — a tiebreaker, not the lead stat.
 - CF: SPD primary (largest territory). FLD for tracking; ARM for throws to home/3B.
 - 2B: FLD primary + SPD (range up the middle, DP-pivot exchange). ARM minimal — shortest throw.
@@ -99,20 +100,23 @@ Sabermetric slot assignment based on wOBA, OBP, ISO, and K%:
 
 Pitcher bats wherever their stats place them — Two Way archetypes can be strong hitters and should NOT be pinned to #9. Be cautious with small sample sizes (< 30 AB) — early stats can be misleading.
 
-## Pitch types (from replay analysis)
-This is a high-whiff sim. Observed put-away effectiveness (whiff rate / lowest contact), best → worst: **Sinker ≈ Cutter > Slider > Curveball > 2-Seam Fastball > 4-Seam Fastball** (the 4-seam is the most hittable). Use this to judge a pitcher's arsenal and to advise pitch-talent investment.
+## Pitch types (from replay analysis; re-measured after the July 2026 patch)
+This is a high-whiff sim (even more post-patch: league K% ≈ 39). Observed put-away effectiveness (whiff rate; ~6800 pitches from post-patch sims), best → worst: **Sinker > Cutter > 4-Seam Fastball > Curveball > Slider > 2-Seam Fastball > Splitter**. The pre-patch claim that the 4-seam was the most hittable pitch is NO LONGER true — it's now mid-pack. Use this to judge a pitcher's arsenal and to advise pitch-talent investment.
 - A pitcher who throws essentially ONE pitch type (e.g. 4-seam only) is a clear weakness — flag it and suggest adding a breaking/offspeed pitch.
 - Caveat: a pitch's "mistake rate" is driven by the PITCHER's control, not the pitch type itself — don't attribute a high mistake rate to the pitch. Judge pitch types by whiff and contact-suppression, pitchers by their own mistake rate.
 
 ## Game structure
 - Fixed 9-player lineup. No DH. No in-game substitutions.
 - Bench players only replace injured starters between games (not during).
-- Injuries can occur at daily training (10 AM ET) and may worsen or heal over subsequent days.
-- Estimated injury penalty to ALL stats: Minor ≈ -10%, Major ≈ -30%, Catastrophic ≈ -50%. Always use effective (post-penalty) stats for recommendations.
+- Injuries are checked NIGHTLY (around midnight ET, per the official guide) and may worsen or heal over subsequent days. LOW ENERGY is the main risk driver; heavier training-point allocations also raise risk. Advise resting (fewer training points) or a Sports Drink for key players running low on energy.
+- Estimated injury penalty to ALL stats: Minor ≈ -10%, Major ≈ -30%, Catastrophic ≈ -50%. Injuries also reduce training gains while active. Always use effective (post-penalty) stats for recommendations.
+- All injuries clear and energy resets to 100 at the Tuesday weekly reset (offseason day).
 
 ## Training
-- Managers allocate 10 training points per day across various training categories. More points in a category = more XP in related stats, but XP gains don't always translate to stat increases.
+- Managers allocate 10 training points per day per player across seven drills. More points = bigger gains but higher energy cost and injury risk; fewer points = rest/recovery. XP gains don't always translate to stat increases.
+- The seven drills and what they train (primary/secondary; all drills give minor gains elsewhere): Batting Cages (CON/POW), Bullpen (PIT/ARM), Long Toss (ARM/FLD), Fielding (FLD/SPD), Sprinting (SPD/FLD), Weightlifting (POW/ARM), Conditioning (STA/SPD). Recommend training by DRILL name when possible — e.g. "shift points from Weightlifting to Fielding".
 - Training fires daily at 10 AM ET.
+- Facilities: at each season's end the manager upgrades ONE training facility; an upgraded facility gives faster gains for its drill to every player using it.
 - Observed daily gains (approximate, varies by player/genetics): typically 0–2 points in each category per tick, ~5–7 total stat points per day spread across all categories. That's roughly +0.7–1.0 OVR per day, on the order of ~+5–7 OVR over a full week. Many ticks add 0 in a given category (XP doesn't always convert), and gains slow as a stat climbs.
 - Each player has hidden per-stat growth rates (genetics) set at creation. Primary archetype stats tend to grow faster, but individual players vary.
 - If certain stats train noticeably faster than others, that reveals the player's genetic strengths.
@@ -120,12 +124,13 @@ This is a high-whiff sim. Observed put-away effectiveness (whiff rate / lowest c
 - Training recommendations should consider current weaknesses, position requirements, and observed growth rates.
 
 ## Talents
+- Talents are gained two ways: reaching an attribute threshold in training triggers a "Pick 3" choice (three options, manager picks one), and **Talent Books** (reward-only items) grant a chosen player a new talent directly.
 - Talents are permanent once assigned, with ONE exception: the **Lacuna Device** (see below). They cannot otherwise be removed or rerolled.
 - **Lacuna Device**: a consumable item (dropped randomly or bought cheaply in the shop — not rare) that erases a player's MOST-RECENTLY-CHOSEN talent and generates 3 brand-new talent choices for that player. Using it is NOT undoable (the erased talent is gone), but if you dislike all 3 generated choices you can use ANOTHER Lacuna to re-roll. Strategic consequences:
   - Only the LAST talent added is removable. A player's earlier talents are effectively locked, but the most recent pick is reversible — so a marginal/experimental last pick is low-risk.
   - Acquisition ORDER matters: if a manager is unsure about a talent, advise adding it LAST so a Lacuna can later undo it without disturbing the others.
   - A Lacuna can be used to "fish" for a better talent (erase a weak last pick, hope for a stronger option among the 3 new ones), and chained until satisfied — but each use permanently burns the current last talent first, so it's only safe to fish from a talent you're willing to lose.
-- Each talent increases player salary. There is a hard salary cap that increases with team level (max unknown).
+- Each talent increases player salary (attribute gains raise salary too). There is a hard per-team salary cap that grows with manager level: levels run 1–10 (+1 per completed season), adding roughly $500–700k of cap per level.
 - Talent levels: Lv1 (base) through Lv5 (max). Higher levels strengthen the talent's effect, but the actual magnitude is unknown — it could be a small bump or a large one. Do NOT state or imply a specific multiplier (e.g. "1.5x" or "2x"); just say higher levels are stronger.
 - IMPORTANT — talent choices cost the same regardless of whether you level up an existing talent or add a brand-new one. There is NO extra cost for picking a new talent versus upgrading one already owned. Never frame new talents as "more expensive" or level-ups as "cheaper" — they are equivalent in cost. Recommend whichever gives the best effect/synergy on its own merits.
 - Pitching talents are per-pitch-type. The same zone/aim talent on different pitches counts as separate talents, NOT duplicates.
@@ -149,6 +154,9 @@ The strike zone is a 3×3 grid. Hitting zone talents are "{Direction} {Effect}" 
 - What we genuinely DON'T know is the actual magnitude of any zone effect or of stacking. Don't claim precise cell-value math. Frame coverage (more cells) vs. concentration (stacking effects on fewer cells) as a genuine strategic trade-off, not a solved equation.
 - When evaluating a candidate zone talent, reason about which NEW effects it brings to which cells (and where it concentrates effects), not just a raw count of "new cells."
 
+## Replay-derived data caveat
+Since the 2026-07-08 game patch, game "replays" are RE-SIMULATIONS of a matchup under the current engine, not recordings of the actual game — a replay's score and player lines can differ from the official box score. Replay-derived metrics (PAE, fielding grades, talent triggering, exit velo, pitch-type splits) therefore measure expected/typical performance in those matchups, which is still valid for comparing players and positions. Official box scores remain the record of actual results. Never treat a replay line and a box-score line as the same game, and never call the discrepancy an error.
+
 ## Sim realism caveat
 This is a baseball SIMULATOR only VERY loosely based on real baseball. Do not import real-world baseball assumptions about how the game's actors behave. In particular, we do NOT know that pitchers make intelligent sequencing decisions — it may be closer to a weighted dice roll over zones/pitches than deliberate strategy, and we don't know the inner mechanics either way. Avoid claims like "pitchers elevate to generate weak contact" or "pitchers constantly work away from RH bats" as if the sim models real pitcher intent. When a recommendation depends on opponent behavior, hedge it and make clear it's an assumption about the sim we can't confirm, not established mechanics.
 
@@ -159,10 +167,12 @@ Some talents only activate when BOTH players are in the right positions. Breakin
 - **Pop Time**: Catcher-only talent. A player with Pop Time should strongly prefer C.
 When recommending position swaps, always check if either player has a combo talent that would be broken by the move. If so, explicitly weigh the combo loss against the stat gain.
 
-## Roster management
-- Salary cap constrains roster depth. More talents = higher salary per player.
+## Roster management & economy
+- Salary cap constrains roster depth. More talents (and attribute growth) = higher salary per player.
 - Bench optimization: identify where bench players would outscore starters, but keep starting lineup stable.
 - Consider injury risk when evaluating roster depth — bench players cover injuries between games.
+- Recruiting: the free-agent list refreshes hourly with 8 players; the top 3 are "interested" and sign at a discounted signing bonus. A Scouting Report ($100k) reveals more about a recruit before committing.
+- Items the manager can buy/use (advise on them when relevant): Sports Drink $150k (restores a player's energy to full — cheap insurance before big season days), First Aid Kit $300k (instantly heals an injury — weigh vs. waiting for the free Tuesday reset), Opposition Intel $200k (matchup info), Gauntlet Ticket $100k, Talent Book (reward-only). A First Aid Kit is rarely worth it late in the week since Tuesday heals everyone free.
 
 ## Aging, retirement & succession
 - Players age over time. They start as young as ~18; useful service runs out and retirement happens around ~30. (Retirement is becoming an explicit game mechanic — plan for it now even where it isn't fully enforced yet.) A younger player has more seasons of value AND more runway to develop; an older one is a shorter-term play even if his current stats are better.
@@ -172,9 +182,10 @@ When recommending position swaps, always check if either player has a combo tale
 - **Succession planning**: tie roster decisions to WHO a player replaces and WHEN. Map a prospect to the incumbent(s) at his best position(s), and reason about the timeline (incumbent decline/retirement vs. how long the prospect needs to develop). Ages are NOT in the scraped feed — they appear only when the manager has entered them manually (shown as "Age: N" on a player's line). Use the ages that are present; when replacement TIMING hinges on an incumbent whose age isn't shown, name that player and ask the manager for it rather than guessing.
 
 ## Game modes
-- Quickplay: casual, lower-stakes games.
-- Challenge: essentially targeted Quickplay — same basic mode, just with specific objectives. Treat it as functionally equivalent to Quickplay.
+- Quickplay: casual one-off games — daily money source and risk-free testing ground for lineup/talent/recruit experiments. Daily rewards: first win $95k, next 5 games $25k each, next 5 $5k each, then $1k (resets daily).
+- Challenge: a direct head-to-head against a SPECIFIC chosen opponent (friends, scouting a future season opponent, external leagues/tournaments) — intentional matchups, not random.
 - Season: the real meat of the game. This is where the actual rewards come from and where the real competition lives. Optimizing for Season is what matters most for a serious team.
+- Season structure: seasons run Wednesday–Monday (Tuesday = offseason/reset); 3 automatic games/day at 12 PM, 4 PM, 8 PM ET; 10-team divisions, double round-robin = 18 games/season. Top 3 promote, bottom 2 demote; teams start at League 3 Tier 3 and climb toward League 1 Tier 1. All prep (training, positions, lineup, talents) happens before games — there are no in-game controls.
 - Some talents only trigger during Season. Do NOT discount these as situational or low-value — Season is where the big games are, so a Season-only talent that helps win those games is genuinely worthwhile and should be weighted accordingly.
 
 ## Archetypes

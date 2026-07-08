@@ -14,19 +14,28 @@ function resultsStr(results: Record<string, number>): string {
     .join(', ');
 }
 
+// Since the 2026-07-08 game patch, replays are re-simulations, not recordings —
+// every AI context built from one must carry this framing exactly once.
+const RESIM_NOTE =
+  'NOTE: since the 2026-07-08 game patch, replays are RE-SIMULATIONS of the matchup under the current engine, not recordings — the score/lines here may differ from the official box score. Treat this as a representative sample of how these teams match up (process quality, tendencies), NOT as the literal game that happened. Do not reconcile it against the official result.';
+
 // Concatenate several games into one context for a multi-game (matchup) read.
 export function buildGamesContext(evals: ReplayEvaluation[], opponentName?: string): string {
   if (!evals.length) return '';
-  const header = `# ${evals.length} game${evals.length === 1 ? '' : 's'}${opponentName ? ` vs ${opponentName}` : ''} (most recent first)`;
-  return [header, '', evals.map(buildGameContext).join('\n\n---\n\n')].join('\n');
+  const header = `# ${evals.length} matchup sim${evals.length === 1 ? '' : 's'}${opponentName ? ` vs ${opponentName}` : ''} (most recent first)`;
+  return [header, '', RESIM_NOTE, '', evals.map((ev) => buildGameContext(ev, false)).join('\n\n---\n\n')].join('\n');
 }
 
-export function buildGameContext(ev: ReplayEvaluation): string {
+export function buildGameContext(ev: ReplayEvaluation, includeNote = true): string {
   const { us, them } = ev;
   const outcome = us.runs > them.runs ? 'WIN' : us.runs === them.runs ? 'TIE' : 'LOSS';
   const lines: string[] = [];
 
-  lines.push(`# Single-game replay: ${us.name} vs ${them.name} — ${outcome} ${us.runs}-${them.runs}`);
+  lines.push(`# Single-game matchup sim: ${us.name} vs ${them.name} — ${outcome} ${us.runs}-${them.runs}`);
+  if (includeNote) {
+    lines.push('');
+    lines.push(RESIM_NOTE);
+  }
   lines.push('');
   lines.push('## Team comparison (us vs them)');
   lines.push(`- Runs: ${us.runs} vs ${them.runs} | Hits: ${us.hits} vs ${them.hits}`);
