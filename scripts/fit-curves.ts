@@ -13,11 +13,13 @@ const MIN_N = 40; // need this many chances to refit a position; else keep curre
 const FIT_POS = [3, 4, 5, 6, 7, 8, 9]; // 1B,2B,3B,SS,LF,CF,RF (skip P/C)
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-// current curve (fallback for sparse positions)
+// current curve (fallback for sparse positions) — keep in sync with POS_CURVE
+// in parseReplay.ts (last refit 2026-07-08 post-patch; OF converts ~100% of
+// engaged chances now, so 7/8/9 are near-1 plateaus).
 const CURRENT: Record<number, { a: number; d50: number }> = {
-  1: { a: 0.35, d50: 12 }, 2: { a: 0.35, d50: 10 }, 3: { a: 0.15, d50: 18 },
-  4: { a: 0.68, d50: 14 }, 5: { a: 0.25, d50: 16 }, 6: { a: 0.66, d50: 14 },
-  7: { a: 0.32, d50: 8 }, 8: { a: 0.22, d50: 8 }, 9: { a: 0.44, d50: 8.5 },
+  1: { a: 0.35, d50: 12 }, 2: { a: 0.35, d50: 10 }, 3: { a: 0.11, d50: 26 },
+  4: { a: 0.76, d50: 17.5 }, 5: { a: 0.44, d50: 14.3 }, 6: { a: 0.39, d50: 16 },
+  7: { a: 0.15, d50: 40 }, 8: { a: 0.15, d50: 40 }, 9: { a: 0.15, d50: 40 },
 };
 
 async function fetchReplay(id: string): Promise<any | null> {

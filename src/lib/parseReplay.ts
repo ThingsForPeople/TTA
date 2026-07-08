@@ -297,6 +297,8 @@ export function evaluateReplay(raw: any, ourTeamId?: string): ReplayEvaluation {
   const pas: PlateAppearance[] = [];
   const pitchers = new Map<string, PitcherEval & { _types: Map<string, PitchTypeStat> }>();
   const talentCounts = new Map<string, number>();
+  // Weather transitions (post-patch mechanic) for a game-conditions note.
+  const weatherEvents: { inning: number | null; layer: string; action: string; intensity?: string }[] = [];
   // Per (ownerId|talentId) triggering + stacking, our side, for the per-player breakdown.
   const talentStats = new Map<string, { playerId: string; talentId: string; acts: number; effects: number; stacked: number; maxTier: number }>();
   const tStat = (ownerId: string, talentId: string) => {
@@ -336,6 +338,9 @@ export function evaluateReplay(raw: any, ourTeamId?: string): ReplayEvaluation {
     let segPitchType: string | undefined;
     let segMistake = false;
     let sawPitch = false;
+    // Post-patch effect.activated dedup: first effect of a (player,talent) in a
+    // segment is the activation; the rest are extra effects of that trigger.
+    const segActivated = new Set<string>();
     for (const ev of seg.events ?? []) {
       if (ev.type === 'pitch.thrown') {
         sawPitch = true;
@@ -414,6 +419,7 @@ export function evaluateReplay(raw: any, ourTeamId?: string): ReplayEvaluation {
           break;
         }
         case 'talent.activated': {
+          // Pre-2026-07-08 format (kept for compat with cached old-format replays).
           const op = pl.ownerId ? playerById.get(pl.ownerId) : undefined;
           if (op && op.side === ourSide && pl.talentId) {
             talentCounts.set(pl.talentId, (talentCounts.get(pl.talentId) ?? 0) + 1);
@@ -422,13 +428,47 @@ export function evaluateReplay(raw: any, ourTeamId?: string): ReplayEvaluation {
           break;
         }
         case 'effect.applied': {
-          // `tier` is the talent's LEVEL (static per player), not an in-game stack.
+          // Pre-2026-07-08 format. `tier` is the talent's LEVEL, not a stack.
           const op = pl.ownerId ? playerById.get(pl.ownerId) : undefined;
           if (op && op.side === ourSide && pl.talentId && typeof pl.tier === 'number') {
             const s = tStat(pl.ownerId, pl.talentId);
             s.effects++;
             if (pl.tier >= 2) s.stacked++;
             if (pl.tier > s.maxTier) s.maxTier = pl.tier;
+          }
+          break;
+        }
+        case 'weather.transition': {
+          // 2026-07-08 patch: weather (rain/wind) exists and physically affects
+          // ball flight. Record transitions for a game-conditions note.
+          const inning = seg.metadata?.inning;
+          if (pl.layer && pl.action) {
+            weatherEvents.push({ inning: typeof inning === 'number' ? inning : null, layer: pl.layer, action: pl.action, intensity: pl.intensity });
+          }
+          break;
+        }
+        case 'effect.activated': {
+          // 2026-07-08 patch: talent.activated + effect.applied merged into one
+          // event. source ∈ talent|weather|affliction; owner is targetEntityId.
+          // No per-trigger event survives, so the first effect of a (player,
+          // talent) in a segment counts as the activation, later ones as extra
+          // effects of the same trigger.
+          if (pl.source !== 'talent') break;
+          const owner: string | undefined = pl.targetEntityId;
+          const op = owner ? playerById.get(owner) : undefined;
+          if (op && op.side === ourSide && pl.talentId) {
+            const s = tStat(owner!, pl.talentId);
+            const key = `${owner}|${pl.talentId}`;
+            if (!segActivated.has(key)) {
+              segActivated.add(key);
+              talentCounts.set(pl.talentId, (talentCounts.get(pl.talentId) ?? 0) + 1);
+              s.acts++;
+            }
+            s.effects++;
+            if (typeof pl.tier === 'number') {
+              if (pl.tier >= 2) s.stacked++;
+              if (pl.tier > s.maxTier) s.maxTier = pl.tier;
+            }
           }
           break;
         }
@@ -544,6 +584,12 @@ export function evaluateReplay(raw: any, ourTeamId?: string): ReplayEvaluation {
     .sort((a, b) => b.count - a.count || b.effects - a.effects);
 
   const notes = buildNotes(us, them, ourPitcher, hardHitThreshold);
+  // Weather affects ball physics post-patch — surface it as a condition note.
+  const wx = weatherEvents.filter((w) => w.action === 'activated');
+  if (wx.length) {
+    const spans = wx.map((w) => `${w.layer}${w.intensity ? ` (${w.intensity})` : ''}${w.inning != null ? ` from inning ${w.inning}` : ''}`);
+    notes.unshift(`Weather: ${[...new Set(spans)].join('; ')} — rain/wind alter ball flight, so contact-quality numbers this game aren't directly comparable to clear-weather games.`);
+  }
 
   return { ourSide, matched, us, them, ourPitcher, talentActivations, talentBreakdown, hardHitThreshold, notes };
 }
@@ -626,6 +672,12 @@ export interface PlayerGameMetrics {
   // by this player with a runner on 1st and < 2 outs. dpStarted/dpOpp = how often
   // a real DP chance was converted into a started DP.
   dpOpp: number;
+  // Count of nearest-fielder range charges (see unreachedDists below).
+  unreached: number;
+  // Query-time transients (never stored): range-aware expected/actual outs from
+  // the combined engaged+unreached fit — see applyRangeCurve in the metrics route.
+  rangeXOuts?: number;
+  rangeEngagedOuts?: number;
   // Raw per-engaged-chance records: distance covered (`d`) + whether it was an
   // out (`o`), plus the integer field coordinates of the engagement (`x`,`y`,
   // quantized — origin = home plate, +x = RF side, −y = deeper). `d`/`o` let the
@@ -634,6 +686,15 @@ export interface PlayerGameMetrics {
   // before a field existed fall back to stored values / are skipped until
   // re-synced (x/y were added after d/o).
   engageDists?: { d: number; o: boolean; x?: number; y?: number }[];
+  // Nearest-fielder range charges (2026-07-08): opponent hits that fell with NO
+  // fielder engaging them as an out chance, charged to the nearest range player
+  // (positions 3–9; P/C excluded — P has no range role, C fields no batted
+  // balls) at dist(start coords → spray landing point). Combined with
+  // engageDists at query time to fit a range-aware out-curve: rPAE charges for
+  // balls a fielder never reached, which plain PAE structurally cannot see.
+  // Spray landing uses the categorical-depth mapping (sprayPoint), so distances
+  // are approximate but unbiased across players.
+  unreachedDists?: { d: number }[];
   // Opponent batted-ball SPRAY faced this game (a true "where it was hit" set,
   // including balls that got through — derived from batter.contact angle+depth,
   // not from where a fielder caught it). Team-level, so stored ONLY on our
@@ -677,23 +738,25 @@ function sprayPoint(horizontalAngle: unknown, hitDepth: unknown): { x: number; y
 // across the 6–12 band where most OF balls land, so OF carries the real
 // leverage. The old steep 2B curve (a=1.0) was a small-sample artifact; at this
 // sample SS and 2B share nearly identical profiles.
-// Re-fit by logistic regression of out-vs-distance over ~50 recent games
-// (1479 engaged chances) via scripts/fit-curves.ts — each position calibrated
-// so mean PAE/chance ≈ 0 (the prior curves had drifted: OF/1B over-read PAE,
-// which made RF look like every player's "best position"). Re-run the fitter
-// and replace these as more games accrue. P (1) and C (2) are not fit — the
-// pitcher rarely fields batted balls and the catcher fields none (steal defense
-// is handled separately), so they keep hand-set IF-ish fallbacks.
+// RE-FIT 2026-07-08 after the July patch's fielding buff (31 post-patch
+// re-sims, ~340 chances). The rebalance changed the landscape: outfielders now
+// convert ~100% of ENGAGED chances (71/71 across LF/CF/RF — no variance, so a
+// logistic can't even be fit there; OF gets a near-1 plateau). Infielders sit
+// at 93–99%. Consequence: engaged-chance leverage is small EVERYWHERE now —
+// remaining OF skill differences live in balls never reached (range), which
+// PAE can't see but post-patch spray data can (future nearest-fielder work).
+// P (1) and C (2) are not fit — the pitcher rarely fields batted balls and the
+// catcher fields none (steal defense is handled separately).
 const POS_CURVE: Record<number, { a: number; d50: number }> = {
   1: { a: 0.35, d50: 12 }, // P  (not fit; rare, IF-ish fallback)
   2: { a: 0.35, d50: 10 }, // C  (not fit; no batted balls, steal D handled separately)
-  3: { a: 0.18, d50: 21 },   // 1B — converts almost everything; very low leverage
-  4: { a: 0.68, d50: 16 },   // 2B
-  5: { a: 0.26, d50: 17.7 }, // 3B — high conversion even at range → low leverage
-  6: { a: 0.58, d50: 14.8 }, // SS
-  7: { a: 0.28, d50: 6.9 },  // LF
-  8: { a: 0.24, d50: 8.5 },  // CF
-  9: { a: 0.51, d50: 9.7 },  // RF — strong-arm corner
+  3: { a: 0.11, d50: 26 },   // 1B — ~95% flat
+  4: { a: 0.76, d50: 17.5 }, // 2B — ~99%, long-tail only
+  5: { a: 0.44, d50: 14.3 }, // 3B
+  6: { a: 0.39, d50: 16 },   // SS
+  7: { a: 0.15, d50: 40 },   // LF — 100% observed; near-1 plateau (14 chances)
+  8: { a: 0.15, d50: 40 },   // CF — 100% observed; near-1 plateau (38 chances)
+  9: { a: 0.15, d50: 40 },   // RF — 100% observed; near-1 plateau (19 chances)
 };
 const DEFAULT_CURVE = { a: 0.35, d50: 11 };
 
@@ -743,6 +806,11 @@ export interface PlayerPositionSplit {
   // OF extra-base suppression at this position (bases held below expected).
   basesSaved: number;
   basesSavedOpps: number;
+  // Range-aware PAE at this position (charges unreached nearest-fielder balls);
+  // null until unreachedDists is backfilled by a re-sync.
+  rangePae: number | null;
+  rangePaePerGame: number | null;
+  unreached: number;
 }
 
 // Per-player aggregate across multiple games (derived rates), returned by the
@@ -767,6 +835,12 @@ export interface AggregatedPlayer {
   rangeAvg: number | null; armAvg: number | null; armMax: number | null; releaseAvg: number | null;
   // range-calibrated plays above expected (engagedOuts − expectedOuts)
   pae: number; expectedOuts: number;
+  // RANGE-AWARE PAE: like pae but the out-curve is fit over engaged chances PLUS
+  // unreached hits charged to the nearest fielder — so it debits balls a fielder
+  // never got to, the blind spot of plain PAE. Mean ≈ 0 per position over the
+  // visible set (same MLE calibration). null until a re-sync backfills
+  // unreachedDists. `unreached` = balls charged (fell for hits, nobody engaged).
+  rangePae: number | null; rangePaePerGame: number | null; unreached: number;
   // OF extra-base suppression (bases held below expected) — the value axis PAE
   // can't see; total, per-game, and the opportunity count it's based on.
   basesSaved: number | null; basesSavedPerGame: number | null; basesSavedOpps: number;
@@ -813,6 +887,7 @@ function emptyMetrics(playerId: string, name: string, position: number | null): 
     throwSpeedSum: 0, throwSpeedCount: 0, throwSpeedMax: 0, releaseSum: 0, releaseCount: 0,
     expectedOuts: 0, engagedOuts: 0, leverageSum: 0, basesSavedSum: 0, basesSavedOpps: 0, stealAttempts: 0, caughtStealing: 0,
     dpInvolved: 0, dpStarted: 0, dpTurned: 0, dpFinished: 0, dpOpp: 0,
+    unreached: 0,
     engageDists: [],
   };
 }
@@ -1001,10 +1076,13 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
     // Batter talents that fired this pitch (pre-swing) — credited with the swing
     // outcome below, so contact talents show "fired N×, contact X%".
     const segFired: string[] = [];
+    // Post-patch effect.activated dedup (see evaluateReplay).
+    const segActivated = new Set<string>();
     for (const ev of seg.events ?? []) {
       const pl = ev.payload ?? {};
       switch (ev.type) {
         case 'talent.activated': {
+          // Pre-2026-07-08 format (compat).
           if (pl.ownerId && pl.talentId) {
             noteTalent(pl.ownerId, pl.talentId, 'act');
             if (pl.ownerId === batterId) segFired.push(pl.talentId);
@@ -1012,7 +1090,25 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
           break;
         }
         case 'effect.applied': {
+          // Pre-2026-07-08 format (compat).
           if (pl.ownerId && pl.talentId && typeof pl.tier === 'number') noteTalent(pl.ownerId, pl.talentId, 'effect', pl.tier);
+          break;
+        }
+        case 'effect.activated': {
+          // 2026-07-08 patch: merged talent event; owner is targetEntityId,
+          // source filters out weather ('wet') and affliction effects. First
+          // effect of a (player,talent) per segment = the activation.
+          if (pl.source !== 'talent') break;
+          const owner: string | undefined = pl.targetEntityId;
+          if (owner && pl.talentId) {
+            const key = `${owner}|${pl.talentId}`;
+            if (!segActivated.has(key)) {
+              segActivated.add(key);
+              noteTalent(owner, pl.talentId, 'act');
+              if (owner === batterId) segFired.push(pl.talentId);
+            }
+            noteTalent(owner, pl.talentId, 'effect', typeof pl.tier === 'number' ? pl.tier : undefined);
+          }
           break;
         }
         case 'batter.action': {
@@ -1069,7 +1165,28 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
           // Opponent batted ball → record its spray point + whether we got the out.
           if (batterSide && batterSide !== ourSide && lastOppContact) {
             const pt = sprayPoint(lastOppContact.ha, lastOppContact.depth);
-            if (pt) oppSpray.push({ x: pt.x, y: pt.y, o: !HIT_RESULTS.has(pl.result ?? '') });
+            if (pt) {
+              oppSpray.push({ x: pt.x, y: pt.y, o: !HIT_RESULTS.has(pl.result ?? '') });
+              // Nearest-fielder range charge: the ball fell for a hit and NO
+              // fielder engaged it as an out chance (engageBuf empty — an
+              // engaged miss/infield single is already an o:false chance for
+              // that fielder; an OF pickup of a landed hit is a retrieval, not
+              // an engagement). HRs clear the wall — nobody could reach them.
+              const result = pl.result ?? '';
+              if (HIT_RESULTS.has(result) && result !== 'homerun' && engageBuf.size === 0) {
+                let best: { id: string; d: number } | null = null;
+                for (const [pid, info] of playerById) {
+                  if (info.side !== ourSide || info.position == null || info.position < 3 || !info.coord) continue;
+                  const d = Math.hypot(pt.x - info.coord.x, pt.y - info.coord.y);
+                  if (!best || d < best.d) best = { id: pid, d };
+                }
+                if (best) {
+                  const r = row(best.id);
+                  r.unreached++;
+                  (r.unreachedDists ??= []).push({ d: Math.round(best.d * 10) / 10 });
+                }
+              }
+            }
           }
           // Bases-saved: credit each OF retrieval for holding the hit below its
           // trajectory's expected bases (positive = suppressed extra bases).
@@ -1168,14 +1285,22 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
             r.putouts++;
             outCredit.add(fielderId);
             if (pl.closePlay) r.closePlays++;
-            // Assist: a different fielder whose throw targeted this out.
-            const credited = new Set<string>();
-            for (const th of throwBuf) {
-              if (th.targetOut && th.targetOut === pl.runnerId && th.throwerId !== fielderId && isOurs(th.throwerId)) {
-                if (!credited.has(th.throwerId)) {
-                  row(th.throwerId).assists++;
-                  outCredit.add(th.throwerId);
-                  credited.add(th.throwerId);
+            if (typeof pl.assistedBy === 'string') {
+              // 2026-07-08 patch: direct assist attribution on the out event.
+              if (pl.assistedBy !== fielderId && isOurs(pl.assistedBy)) {
+                row(pl.assistedBy).assists++;
+                outCredit.add(pl.assistedBy);
+              }
+            } else {
+              // Old format fallback: a different fielder whose throw targeted this out.
+              const credited = new Set<string>();
+              for (const th of throwBuf) {
+                if (th.targetOut && th.targetOut === pl.runnerId && th.throwerId !== fielderId && isOurs(th.throwerId)) {
+                  if (!credited.has(th.throwerId)) {
+                    row(th.throwerId).assists++;
+                    outCredit.add(th.throwerId);
+                    credited.add(th.throwerId);
+                  }
                 }
               }
             }
@@ -1308,11 +1433,16 @@ export function collectFieldingChances(raw: any, ourTeamId?: string): FieldingCh
         if (pl.targetBase !== MOUND_BASE && pl.throwerId) throwBuf.push({ throwerId: pl.throwerId, targetOut: pl.targetOut ?? null, base: pl.targetBase });
       } else if (ev.type === 'runner.out' && isOurs(pl.fielderId)) {
         outCredit.add(pl.fielderId);
-        const credited = new Set<string>();
-        for (const th of throwBuf) {
-          if (th.targetOut && th.targetOut === pl.runnerId && th.throwerId !== pl.fielderId && isOurs(th.throwerId) && !credited.has(th.throwerId)) {
-            outCredit.add(th.throwerId);
-            credited.add(th.throwerId);
+        if (typeof pl.assistedBy === 'string') {
+          // 2026-07-08 patch: direct assist attribution.
+          if (isOurs(pl.assistedBy)) outCredit.add(pl.assistedBy);
+        } else {
+          const credited = new Set<string>();
+          for (const th of throwBuf) {
+            if (th.targetOut && th.targetOut === pl.runnerId && th.throwerId !== pl.fielderId && isOurs(th.throwerId) && !credited.has(th.throwerId)) {
+              outCredit.add(th.throwerId);
+              credited.add(th.throwerId);
+            }
           }
         }
       }

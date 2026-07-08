@@ -34,7 +34,10 @@ const TIME_FILTERS: { value: TimeFilter; label: string }[] = [
 ];
 
 const MATCHUP_PROMPT =
-  'These are my team’s games against ONE opponent (most recent first). Analyze the matchup as a whole — look for patterns ACROSS games, not just one:\n\n' +
+  'These are matchup re-simulations of my team’s games against ONE opponent (most recent first). ' +
+  'They sample how the rosters match up under the current engine (per the note above, they aren’t recordings ' +
+  'of the actual games — the head-to-head RECORD shown elsewhere is from official results). ' +
+  'Analyze the matchup as a whole — look for patterns ACROSS sims, not just one:\n\n' +
   '1. HOW WE FARE — the overall pattern vs this opponent (winning/losing, by how much, trending which way).\n' +
   '2. WHAT THEY DO TO US — recurring problems across these games (their pitching gives our bats trouble? they tee off on our pitching? a repeating inning/situation?).\n' +
   '3. WHAT WORKS FOR US — what has gone right that we should lean into.\n' +

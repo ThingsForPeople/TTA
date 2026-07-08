@@ -7,14 +7,15 @@
 //   • expectedBases(ev, la)   — for DEFENSIVE expected-bases (the baseline a
 //     fielding play is credited against in the bases-saved metric).
 //
-// PROVISIONAL (fit 2026-06-29, 979 batted balls): the EV×LA "barrel" structure
-// is clear and reliable in the dense cells; extreme-combo cells (impossible
-// pairings like high-LA + top-EV that rarely occur) are filled to their nearest
-// in-row neighbor. This is a HIGH-offense sim — league wOBA-on-contact ≈ .659.
-// Re-fit as more replays accrue: `npx tsx scripts/fit-expected-outcome.ts`.
+// RE-FIT 2026-07-08 from 1318 POST-PATCH batted balls (the July 2026 patch
+// rebalanced offense: league wOBA-on-contact fell 0.659 → 0.551). Dense cells
+// reliable; extreme-combo cells filled to their nearest in-row neighbor. NO
+// balls landed in the 40°+ LA buckets post-patch (launch angles compressed) —
+// those rows keep near-zero "it's basically an out" fills.
+// Re-fit: `REPLAY_DIR=<harvest dir> npx tsx scripts/fit-expected-outcome.ts`.
 //
 // EV is sim-internal (not mph); EV_CUTS are this sim's batted-ball quintiles.
-const EV_CUTS = [32.5, 36, 40.7, 45];
+const EV_CUTS = [32.5, 35.3, 39.7, 45];
 
 // Launch-angle buckets: <0 (chopper) / 0-10 / 10-20 / 20-30 / 30-40 / 40-55 / >55.
 function laBucket(la: number): number {
@@ -26,26 +27,26 @@ function evBucket(ev: number): number {
 
 // [laBucket 0-6][evBucket 0-4]. Empty extreme cells filled to nearest neighbor.
 const E_BASES: number[][] = [
-  [0.38, 0.21, 0.19, 0.24, 0.24], // <0  grounders
-  [0.17, 0.41, 0.45, 0.80, 0.80], // 0-10
-  [0.69, 0.69, 0.98, 1.05, 1.25], // 10-20 line drives
-  [0.67, 1.00, 0.96, 1.65, 2.48], // 20-30
-  [0.36, 0.53, 1.89, 2.29, 4.00], // 30-40 fly balls → HR at top EV
-  [0.12, 0.12, 0.12, 0.12, 0.12], // 40-55 high flies
-  [0.00, 0.15, 0.15, 0.15, 0.15], // >55  pop-ups
+  [0.14, 0.13, 0.06, 0.07, 0.07], // <0  grounders (top-EV cell filled)
+  [0.35, 0.35, 0.43, 0.33, 0.33], // 0-10 (edge cells filled)
+  [0.67, 0.67, 0.67, 0.98, 1.20], // 10-20 line drives (low-EV cells filled)
+  [0.60, 0.66, 0.97, 1.49, 2.02], // 20-30
+  [0.43, 0.41, 1.09, 2.15, 4.00], // 30-40 fly balls → HR at top EV
+  [0.05, 0.05, 0.05, 0.05, 0.05], // 40-55 unobserved post-patch (near-out fill)
+  [0.00, 0.05, 0.05, 0.05, 0.05], // >55  unobserved post-patch (near-out fill)
 ];
 const WOBACON: number[][] = [
-  [0.312, 0.163, 0.167, 0.180, 0.180],
-  [0.153, 0.366, 0.400, 0.508, 0.508],
-  [0.576, 0.576, 0.732, 0.782, 0.870],
-  [0.537, 0.803, 0.745, 1.072, 1.445],
-  [0.320, 0.377, 1.094, 1.200, 2.100],
-  [0.105, 0.105, 0.105, 0.105, 0.105],
-  [0.000, 0.137, 0.137, 0.137, 0.137],
+  [0.124, 0.102, 0.058, 0.065, 0.065],
+  [0.314, 0.314, 0.381, 0.297, 0.297],
+  [0.583, 0.583, 0.571, 0.773, 0.859],
+  [0.534, 0.584, 0.724, 0.938, 1.231],
+  [0.381, 0.281, 0.663, 1.169, 2.100],
+  [0.040, 0.040, 0.040, 0.040, 0.040],
+  [0.000, 0.040, 0.040, 0.040, 0.040],
 ];
 
 /** League average wOBA-on-contact (the baseline xwOBAcon compares against). */
-export const LEAGUE_WOBACON = 0.659;
+export const LEAGUE_WOBACON = 0.551;
 
 /** Expected total bases for a batted ball of this trajectory (defense baseline). */
 export function expectedBases(exitVelocity: number, launchAngle: number): number {

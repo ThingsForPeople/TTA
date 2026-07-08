@@ -260,6 +260,9 @@ function buildSplits(byPos: Map<number, { games: number; sum: Sums }>): PlayerPo
       dpOpp: s.dpOpp,
       basesSaved: Math.round(s.basesSavedSum * 100) / 100,
       basesSavedOpps: s.basesSavedOpps,
+      rangePae: s.rangeXOuts > 0 ? Math.round((s.rangeEngagedOuts - s.rangeXOuts) * 10) / 10 : null,
+      rangePaePerGame: s.rangeXOuts > 0 && games > 0 ? Math.round(((s.rangeEngagedOuts - s.rangeXOuts) / games) * 100) / 100 : null,
+      unreached: s.unreached,
     });
   }
   // Most-played first (tie-break by chances), so [0] is the primary position.
@@ -360,6 +363,62 @@ function applyGameContext(rows: { gameId: string; position: number | null; metri
   }
 }
 
+// Range-aware PAE (nearest-fielder v2, enabled by post-patch spray data): fit
+// the per-position out-curve over engaged chances PLUS unreached hits charged
+// to the nearest fielder (o = false, distance = start → landing). The combined
+// MLE forces Σouts = ΣP per fitted position, so rangePae is mean-0 per position
+// like plain PAE — but it debits range a fielder lacks, which plain PAE
+// structurally can't. Writes query-time transients (rangeXOuts /
+// rangeEngagedOuts) that aggregate() turns into rangePae. Rows synced before
+// unreachedDists existed contribute engaged records only; their rangePae ≈ pae.
+function applyRangeCurve(rows: { position: number | null; metrics: PlayerGameMetrics }[]) {
+  const byPos = new Map<number, { d: number; o: boolean }[]>();
+  for (const r of rows) {
+    if (r.position == null) continue;
+    const arr = byPos.get(r.position) ?? [];
+    for (const e of r.metrics.engageDists ?? []) arr.push(e);
+    for (const u of r.metrics.unreachedDists ?? []) arr.push({ d: u.d, o: false });
+    if (arr.length) byPos.set(r.position, arr);
+  }
+  const curves = new Map<number, { a: number; d50: number }>();
+  for (const [pos, data] of byPos) {
+    const fit = fitOutCurve(data, DYNAMIC_MIN_CHANCES);
+    if (fit) curves.set(pos, fit);
+  }
+  const touched: { r: (typeof rows)[number]; n: number }[] = [];
+  for (const r of rows) {
+    const ed = r.metrics.engageDists ?? [];
+    const ud = r.metrics.unreachedDists ?? [];
+    if (ed.length === 0 && ud.length === 0) continue;
+    const c = r.position != null ? curves.get(r.position) : undefined;
+    const P = (d: number) => (c ? curveOut(c, d) : expectedOut(d, r.position));
+    let xo = 0, outs = 0;
+    for (const { d, o } of ed) { xo += P(d); if (o) outs++; }
+    for (const { d } of ud) xo += P(d);
+    r.metrics = { ...r.metrics, rangeXOuts: xo, rangeEngagedOuts: outs };
+    touched.push({ r, n: ed.length + ud.length });
+  }
+  // Re-center per position: a boundary/degenerate logistic fit (or the static
+  // fallback) doesn't satisfy Σouts = ΣP, which would let calibration drift
+  // (validated on the calibration corpus: ΣrangePAE was +13.6 uncentered).
+  // Shift each row's rangeXOuts by the position's mean rangePAE/record ×
+  // records — mean-0 per position exactly, same trick as applyGameContext.
+  const posAcc = new Map<number, { pae: number; n: number }>();
+  for (const { r, n } of touched) {
+    if (r.position == null) continue;
+    const a = posAcc.get(r.position) ?? { pae: 0, n: 0 };
+    a.pae += (r.metrics.rangeEngagedOuts ?? 0) - (r.metrics.rangeXOuts ?? 0);
+    a.n += n;
+    posAcc.set(r.position, a);
+  }
+  for (const { r, n } of touched) {
+    if (r.position == null) continue;
+    const a = posAcc.get(r.position)!;
+    if (a.n <= 0) continue;
+    r.metrics = { ...r.metrics, rangeXOuts: (r.metrics.rangeXOuts ?? 0) + (a.pae / a.n) * n };
+  }
+}
+
 function aggregate(rows: { playerId: string; playerName: string; position: number | null; metrics: PlayerGameMetrics }[]): AggregatedPlayer[] {
   type TStat = { acts: number; effects: number; stacked: number; maxTier: number; firedSwings: number; firedContact: number };
   const acc = new Map<string, { name: string; games: number; sum: Sums; maxEV: number; armMax: number; byPos: Map<number, { games: number; sum: Sums }>; talents: Map<string, TStat> }>();
@@ -430,6 +489,9 @@ function aggregate(rows: { playerId: string; playerName: string; position: numbe
       releaseAvg: s.releaseCount ? Math.round((s.releaseSum / s.releaseCount) * 1000) / 1000 : null,
       pae: Math.round((s.engagedOuts - s.expectedOuts) * 10) / 10,
       expectedOuts: Math.round(s.expectedOuts * 10) / 10,
+      rangePae: s.rangeXOuts > 0 ? Math.round((s.rangeEngagedOuts - s.rangeXOuts) * 10) / 10 : null,
+      rangePaePerGame: s.rangeXOuts > 0 && a.games > 0 ? Math.round(((s.rangeEngagedOuts - s.rangeXOuts) / a.games) * 100) / 100 : null,
+      unreached: s.unreached,
       basesSaved: s.basesSavedOpps > 0 ? Math.round(s.basesSavedSum * 100) / 100 : null,
       basesSavedPerGame: s.basesSavedOpps > 0 && a.games > 0 ? Math.round((s.basesSavedSum / a.games) * 100) / 100 : null,
       basesSavedOpps: s.basesSavedOpps,
@@ -455,6 +517,7 @@ const NUMERIC_KEYS: (keyof PlayerGameMetrics)[] = [
   'rangeSum', 'rangeCount', 'throwSpeedSum', 'throwSpeedCount', 'releaseSum', 'releaseCount',
   'expectedOuts', 'engagedOuts', 'leverageSum', 'basesSavedSum', 'basesSavedOpps', 'stealAttempts', 'caughtStealing',
   'dpInvolved', 'dpStarted', 'dpTurned', 'dpFinished', 'dpOpp',
+  'unreached', 'rangeXOuts', 'rangeEngagedOuts',
 ];
 
 // GET — aggregated advanced stats across stored replay metrics.
@@ -511,6 +574,8 @@ export async function GET(
   // Strip the shared per-game fielding-difficulty component from PAE so a
   // backup whose reps cluster in tougher games isn't penalized for context.
   applyGameContext(filtered);
+  // Range-aware PAE: refit including unreached nearest-fielder charges.
+  applyRangeCurve(filtered);
   const players = aggregate(filtered.map((r) => ({ playerId: r.playerId, playerName: r.playerName, position: r.position, metrics: r.metrics })));
   const forImportance = filtered.map((r) => ({ position: r.position, metrics: r.metrics }));
   const positionImportance = buildPositionImportance(forImportance);

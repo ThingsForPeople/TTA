@@ -108,6 +108,16 @@ npm run db:studio    # Open Drizzle Studio
 
 A second, richer data source beyond the roster scrape: **per-game replay event logs**. This powers the Advanced Stats panel (Stats tab) and the Replay Analysis tab (box-score modal).
 
+> **⚠️ 2026-07-08 game patch — replay semantics changed (verified empirically; no public patch notes), and the app was reshaped for it the same day.** `/api/replay/:gameId` now returns a **re-simulation under the current engine**, NOT the actual game: final score and per-player lines disagree with the box score for the same game_id (verified: replay 0–6 vs box 1–3). This holds for old games too — the pre-patch engine is unobservable via replays. Responses are CDN-cached (stable per gameId); cache-busted fetches 502. **Box scores remain ground truth of actual results** (shape unchanged). Replay-derived features are therefore framed as **matchup sims / expected performance** throughout the UI and AI prompts (box-modal tab renamed "Sim Analysis"; `gameSummary` embeds a re-sim note; `system-prompt.ts` has a "Replay-derived data caveat"). The old box-score reconciliation is dead by design; the surviving internal check is `putouts ≈ 3×innings − K` within a re-sim (verified post-patch, 31 games).
+>
+> **Event-model changes (all handled in `parseReplay.ts`, old-format cases kept for compat):** segments are now `setup|pre|pitch|transition|post_game|meta` (`batter.result` + atBatId join unchanged, PA counting verified). `talent.activated`/`effect.applied` merged into **`effect.activated`** with `source ∈ talent|weather|affliction` and owner in `targetEntityId` (no `targetKey` — engine-lever harvesting from replays is dead; `talentEffects.ts` static dictionary is now the only source; new patch talents like `clutch_cascade`, `count_fighter`, `quick_strike_adaptation` have no decoded levers yet). Parser counts first-effect-per-(player,talent)-per-segment as the activation. **Weather** exists (`weather.transition`, `wet` debuff, wind/airDensity in `ball.flight`) — surfaced as a conditions note in evaluations; a per-game weather flag in `replayMetrics` for PAE conditioning is future work. `runner.out` gained `outType` + **`assistedBy`** (now the primary assist credit; targetOut-matching kept as old-format fallback; verified they agree). `ball.thrown` duplicates `fielder.throw` (ignored). `batter.contact`/`ball.flight` carry **spray + landing data** — the "v2 nearest-fielder is NOT feasible" conclusion below is obsolete. `fielder.miss` + `runner.steal`/`stolen_base` unchanged (verified). `batter.to_plate` carries a cumulative in-game `statline` (unused).
+>
+> **Engine rebalance (measured from 25 pre / 33+ post box scores of ACTUAL games):** runs/g 17.7→9.2, AVG .397→.307, K% 33.4→39.4, BB% 2.6→1.9, errors/g 2.84→0.67. Recalibrated same-day on post-patch data: `analysis.ts` league anchors (.352 wOBA / .320 OBP) + `LEAGUE_RATES`; `runExpectancy.ts` RE24 matrix (524 half-innings); `expectedOutcome.ts` xwOBA/E_BASES tables + `LEAGUE_WOBACON` 0.551 (1318 batted balls); `POS_CURVE` (see below); pitch put-away ranking in `system-prompt.ts` is now **Sinker > Cutter > 4-Seam > Curve > Slider > 2-Seam > Splitter** (4-seam no longer most hittable). Fitter scripts accept `REPLAY_DIR=<dir>` to fit from locally harvested replay JSON instead of re-fetching.
+>
+> **KEY post-patch fielding fact:** outfielders convert **~100% of engaged chances** (71/71 in the calibration corpus) — the pre-patch "OF carries the leverage" finding is obsolete. Engaged-chance leverage is small everywhere now; remaining fielder skill differences live in **range on balls never reached**. OF `POS_CURVE` entries are near-1 plateaus. Old `replayMetrics` rows (pre-patch engine + old extraction) are incompatible — **Clear & re-sync required**.
+>
+> **Nearest-fielder range metric (rPAE, built 2026-07-08):** every opponent hit that falls with NO fielder engaging it (engageBuf empty at `batter.result`; HRs excluded) is charged to the nearest range player (positions 3–9, by start-coords → `sprayPoint` landing distance) as `unreachedDists` in `replayMetrics` (needs re-sync). The query route (`applyRangeCurve`) fits the per-position out-curve over engaged+unreached records and emits `rangePae`/`rangePaePerGame`/`unreached` per player + per-position split, explicitly re-centered to mean-0 per position (boundary logistic fits otherwise drift — validated ΣrPAE=0.0 on the corpus). Combined out-rates get real variance back (OF 15–38% vs 100% engaged-only), so **rPAE is the post-patch fielding-skill separator**; shown as `rPAE`/`Unrch` columns in Advanced fielding + the by-position breakdown. Caveats: spray distance is categorical-depth approximate; solo-occupant positions still read ≈0 (player is his own baseline); plain PAE/importance/optimizer are untouched (wiring rPAE into `fieldingGrades` is future work).
+
 ### Upstream endpoints (all public, no auth)
 - `GET /api/replay/:gameId` — full deterministic event log, **~2.8 MB**. Shape: `{ game:{home,away:{id,name,players:[{id,position(1-9),firstName,lastName,bats,throws,speed,coordinates{x,y},talents[{id,tier,displayName}]}]}}, segments:[{type,events:[{type,payload}],metadata:{inning,half,atBatId,batterId,pitcherId},gameState:{score,hits,outs,runners}}] }`. **Rate-limits bursts (429)** — fetch gently.
 - `GET /api/team-search/teams/:uuid/games?offset=N` — paginated games list (`{results,has_more}`, 10/page, newest-first).
@@ -157,17 +167,54 @@ Tiny Teams Baseball is a mobile game where players recruit, train, and compete w
 - **Player archetypes** (11 types) affect stats and playstyle
 - **Talents** are special abilities per player (e.g., "Clutch", "Set the Tone", "Law & Order") — some require both pitcher AND catcher to have the talent. Talents are permanent once chosen, EXCEPT the most-recently-added one, which a **Lacuna Device** (a common drop / cheap shop item) can erase — doing so re-generates 3 new talent choices for that player. Not undoable, but you can chain another Lacuna to re-roll the choices. Surfaced to the AI in `system-prompt.ts` so talent advice accounts for the "last pick is reversible" mechanic
 - **Sim stats**: CON (contact), POW (power), SPD (speed), FLD (fielding), ARM (arm strength), PIT (pitching), STA (stamina) — each 0-100
-- **Game modes**: Quickplay, Challenge, Season
+- **Game modes**: Quickplay (casual one-offs, daily money), Challenge (a direct head-to-head vs a SPECIFIC chosen opponent — friend play, scouting prep — not just "targeted quickplay"), Season (automatic scheduled games)
 - **Positions**: Standard baseball (C, 1B, 2B, SS, 3B, LF, CF, RF, P) + bench (BN)
 - **Batting order**: 9 slots, pitcher typically bats 9th. The analyzer recommends orders based on role-based slot assignment (cleanup=SLG, leadoff=OBP-K%, etc.)
+
+The official reference for game mechanics is https://www.tiny-teams.com/early-access/guide (10 sub-pages: training, attributes, positions, lineup, talents, recruiting, games, seasons, rewards, progression). Facts below were synced from it 2026-07-07.
 
 ### Game schedule (all times ET)
 
 | Event | When | What happens |
 |---|---|---|
-| **Weekly reset** | Tuesday 6 AM | All players fully heal (energy → 100, injuries cleared). Current season closes. |
-| **Daily reset** | Every day 6 AM | Injury rolls on players. Quickplay rewards reset. |
+| **Weekly reset / offseason** | Tuesday (reset observed ~6 AM) | All players fully heal (energy → 100, injuries cleared). Season ends Monday; Tuesday is the offseason day; new season starts Wednesday. |
+| **Daily reset** | Every day 6 AM | Quickplay rewards reset. |
+| **Injury check** | Nightly, midnight (per official guide) | Injury roll on players; LOW ENERGY raises risk, as do more training points. (We previously assumed this happened at the 6 AM daily reset.) |
 | **Training tick** | Every day 10 AM | Sim stats update from training. The analyzer groups stat snapshots by this boundary (14:00 UTC). |
+| **Season games** | 12 PM, 4 PM, 8 PM daily (Wed–Mon) | Three automatic season games per day; no need to be online. |
+
+### Training drills (official)
+
+Each player allocates **10 training points/day** across seven drills; more points = bigger gains but higher energy cost and injury risk. Each drill trains a primary + secondary stat (minor gains elsewhere):
+
+| Drill | Primary | Secondary |
+|---|---|---|
+| Batting Cages | CON | POW |
+| Bullpen | PIT | ARM |
+| Long Toss | ARM | FLD |
+| Fielding | FLD | SPD |
+| Sprinting | SPD | FLD |
+| Weightlifting | POW | ARM |
+| Conditioning | STA | SPD |
+
+Injury severities: Minor / Major / Catastrophic — effects include attribute penalties AND reduced training gains. Projected energy on the training screen is post-training (lower the points to rest a player).
+
+### Seasons & league pyramid (official)
+
+- 10-team divisions, double round-robin (each opponent home+away) = **18 games/season**, 3/day over 6 days (Wed–Mon).
+- **Top 3 promote, bottom 2 demote.** New teams start at League 3 Tier 3; the apex is League 1 Tier 1.
+
+### Economy, items & progression (official)
+
+- **Quickplay daily money**: first win $95k, next 5 games $25k each, next 5 $5k each, then $1k.
+- **Shop/items**: Scouting Report $100k (reveals recruit info), Opposition Intel $200k (matchup intel), Gauntlet Ticket $100k (Gauntlet mode entry), Sports Drink $150k (energy → full), First Aid Kit $300k (instantly heals injury), Talent Book (reward-only — grants a chosen player a new talent). The Lacuna Device (see Talents above) isn't in the guide but is confirmed in-game.
+- **Talent acquisition**: hitting an attribute threshold in training triggers a "Pick 3" talent choice; Talent Books add one directly.
+- **Recruiting**: free-agent list refreshes hourly with 8 players; the top 3 are "interested" and get a signing-bonus discount. Player salary rises as they gain attributes AND talents. Salary cap is per-team.
+- **Manager level**: 1–10, +1 per completed season; salary cap grows ~$500–700k per level. At each season's end you upgrade ONE training facility (upgraded facility = faster gains for its drill, e.g. Batting Cages → CON/POW).
+
+### Official position guidance vs. our replay data
+
+The official positions guide is attribute-prior based: P = PIT+ARM; C = ARM+FLD+bat; 1B = POW/CON (arm least critical); 2B = FLD/CON/ARM/SPD (short throw, weak arm OK); SS = FLD/ARM/SPD (most demanding); 3B = ARM first (longest throw), then bat + FLD; OF = SPD/FLD/ARM. **Our replay-derived finding partially disagrees**: FLD — not ARM — best predicts out conversion at every IF spot, and OF (not IF) carries the most defensive leverage. Treat the official guide as the hand-tuned prior; the data-driven weights in `system-prompt.ts` / derived stat weights take precedence for analysis.
 
 ### Handedness
 

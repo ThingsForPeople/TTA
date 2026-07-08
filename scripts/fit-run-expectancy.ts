@@ -61,8 +61,19 @@ function ingest(raw: any) {
 }
 
 async function main() {
-  const ids = await enumerate();
-  for (const id of ids) { const raw = await fetchReplay(id); if (raw) ingest(raw); await sleep(800); }
+  // REPLAY_DIR mode: fit from locally harvested replay JSON files instead of
+  // fetching (harvest once, fit many — the endpoint 429s aggressive walks).
+  const dir = process.env.REPLAY_DIR;
+  if (dir) {
+    const fs = await import('fs');
+    const path = await import('path');
+    for (const f of fs.readdirSync(dir).filter((f) => f.endsWith('.json'))) {
+      ingest(JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')));
+    }
+  } else {
+    const ids = await enumerate();
+    for (const id of ids) { const raw = await fetchReplay(id); if (raw) ingest(raw); await sleep(800); }
+  }
   const BASE = ['___', '1__', '_2_', '12_', '__3', '1_3', '_23', '123'];
   const avg = (a: number[]) => (a.length ? a.reduce((s, v) => s + v, 0) / a.length : NaN);
   console.log(`Fit over ${halfInnings} complete half-innings\nbase   0out (n)      1out (n)      2out (n)`);

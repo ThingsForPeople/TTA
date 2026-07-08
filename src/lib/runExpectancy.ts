@@ -9,22 +9,26 @@
 // base-out state to the END of the half-inning, fit empirically from replays
 // (scripts/fit-run-expectancy.ts) — standard RE24, complete innings only.
 //
-// PROVISIONAL (fit 2026-06-29 over ~300 half-innings): well-sampled states
-// (bases empty / 1B / 2B / 1st+2nd, n≥40) are reliable; thin states (bases
-// loaded, runner-on-3rd at 0-1 out — n<20) are noisy and not strictly monotonic
-// yet. This is a high-offense sim: RE(empty,0) ≈ 0.87 runs/inning, ~2× MLB.
-// Re-fit as more replays accrue: `npx tsx scripts/fit-run-expectancy.ts`.
+// RE-FIT 2026-07-08 over 524 complete half-innings of POST-PATCH re-sims —
+// the July 2026 patch nearly halved scoring, so the old high-offense matrix
+// (RE(empty,0) ≈ 0.87) over-valued everything ~2×. Post-patch RE(empty,0) ≈
+// 0.43, close to real-MLB scale. Well-sampled states (n≥50) reliable; thin
+// states marked. Two cells are estimates: __3@0out (unobserved, interpolated
+// between _2_ and 1_3) and 123@0out (n=3 measured a nonsense 0.667 — below
+// 12_@0out; replaced with 12_ scaled by MLB's loaded/12_ ratio ≈1.5). Re-fit
+// as more post-patch replays accrue:
+// `REPLAY_DIR=<harvest dir> npx tsx scripts/fit-run-expectancy.ts`.
 //
 // baseState bits: 1B=1, 2B=2, 3B=4 (so 0=empty … 7=loaded).
 const RUN_EXPECTANCY: number[][] = [
-  [0.871, 0.224, 0.097], // ___  empty
-  [1.543, 0.667, 0.301], // 1__
-  [2.246, 0.762, 0.395], // _2_
-  [1.692, 0.727, 0.488], // 12_
-  [3.444, 1.938, 0.565], // __3   (thin/noisy)
-  [2.364, 1.667, 0.548], // 1_3   (thin)
-  [2.800, 1.750, 0.577], // _23   (thin)
-  [1.667, 1.667, 1.714], // 123   (thin/noisy)
+  [0.426, 0.221, 0.076], // ___  empty
+  [0.862, 0.496, 0.167], // 1__
+  [0.833, 0.731, 0.268], // _2_
+  [1.318, 0.840, 0.400], // 12_
+  [0.950, 0.833, 0.333], // __3   (0out estimated; 1-2out thin)
+  [1.333, 1.227, 0.647], // 1_3   (thin)
+  [2.462, 1.400, 0.697], // _23   (0out thin n=13)
+  [2.000, 0.800, 0.676], // 123   (0out estimated from 12_; 1out thin n=10)
 ];
 
 export interface BaseOut {

@@ -300,7 +300,9 @@ const int = (v: number | null) => (v == null || v === 0 ? '·' : String(v));
 const signed1 = (v: number | null) => (v == null ? '·' : (v > 0 ? '+' : '') + (Math.round(v * 10) / 10));
 
 const FIELDING_COLS: Column[] = [
-  { key: 'pae', label: 'PAE', title: 'Plays Above Expected — outs made minus expected, given how far each ball was (range-calibrated). 0 = average, positive = better.', get: (p) => p.pae, fmt: signed1 },
+  { key: 'pae', label: 'PAE', title: 'Plays Above Expected — outs made minus expected, given how far each ball was (range-calibrated). 0 = average, positive = better. Only counts balls the fielder ENGAGED.', get: (p) => p.pae, fmt: signed1 },
+  { key: 'rangePae', label: 'rPAE', title: 'Range-aware PAE — like PAE, but hits that fell with NO fielder engaging them are charged to the nearest fielder at their landing distance. Debits range a fielder lacks (plain PAE can’t see those balls). 0 = average; post-patch this is the main fielding-skill separator. Re-sync to populate.', get: (p) => p.rangePae, fmt: signed1 },
+  { key: 'unreached', label: 'Unrch', title: 'Unreached hits charged to this player as the nearest fielder (they landed closest to him and nobody engaged them). Feeds rPAE.', get: (p) => p.unreached, fmt: int },
   { key: 'expectedOuts', label: 'xOuts', title: 'Expected outs from the balls this fielder engaged', get: (p) => p.expectedOuts, fmt: num1 },
   { key: 'plays', label: 'Plays', title: 'Putouts + assists', get: (p) => p.plays, fmt: int },
   { key: 'putouts', label: 'PO', get: (p) => p.putouts, fmt: int },
@@ -340,7 +342,7 @@ function PositionBreakdown({ player, colSpan }: { player: AggregatedPlayer; colS
         <table className="text-[11px]">
           <thead>
             <tr className="text-[10px] uppercase tracking-wider text-slate-600">
-              {['Pos', 'G', 'Ch', 'Plays', 'E', 'Fld%', 'PAE', 'PAE/g', 'Range', 'Arm'].map((h) => (
+              {['Pos', 'G', 'Ch', 'Plays', 'E', 'Fld%', 'PAE', 'PAE/g', 'rPAE/g', 'Unrch', 'Range', 'Arm'].map((h) => (
                 <th key={h} className={'px-2 py-0.5 ' + (h === 'Pos' ? 'text-left' : 'text-right')}>{h}</th>
               ))}
             </tr>
@@ -361,6 +363,8 @@ function PositionBreakdown({ player, colSpan }: { player: AggregatedPlayer; colS
                   <td className="px-2 py-0.5 text-right font-mono">{rate3(s.fieldPct)}</td>
                   <td className="px-2 py-0.5 text-right font-mono">{signed1(s.pae)}</td>
                   <td className="px-2 py-0.5 text-right font-mono">{signed1(s.paePerGame)}</td>
+                  <td className="px-2 py-0.5 text-right font-mono" title="Range-aware PAE/game — includes unreached hits charged as nearest fielder">{signed1(s.rangePaePerGame)}</td>
+                  <td className="px-2 py-0.5 text-right font-mono" title="Unreached hits charged at this position">{int(s.unreached)}</td>
                   <td className="px-2 py-0.5 text-right font-mono">{num1(s.rangeAvg)}</td>
                   <td className="px-2 py-0.5 text-right font-mono">{num1(s.armAvg)}</td>
                 </tr>
@@ -369,7 +373,7 @@ function PositionBreakdown({ player, colSpan }: { player: AggregatedPlayer; colS
           </tbody>
         </table>
         <p className="mt-1 text-[10px] text-slate-600">
-          PAE/g is <em>position-relative</em> (the out-curve is calibrated so an average fielder ≈ 0 at each spot), so it’s comparable across a player’s rows — positive = above the typical fielder there. ★ = best among spots with ≥{MIN_SPLIT_GAMES}G &amp; ≥{MIN_SPLIT_CHANCES} chances; <span className="text-slate-500">~</span> = low sample. PAE only scores balls actually reached, so it can’t see range a fielder lacks.
+          PAE/g is <em>position-relative</em> (the out-curve is calibrated so an average fielder ≈ 0 at each spot), so it’s comparable across a player’s rows — positive = above the typical fielder there. ★ = best among spots with ≥{MIN_SPLIT_GAMES}G &amp; ≥{MIN_SPLIT_CHANCES} chances; <span className="text-slate-500">~</span> = low sample. PAE only scores balls actually reached; <em>rPAE/g</em> also charges hits that fell nearest to this player with nobody engaging them — post-patch (fielders convert ~100% of reached balls) it’s the better skill separator. Re-sync to populate rPAE.
         </p>
       </td>
     </tr>
@@ -786,7 +790,7 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
   return (
     <CollapsiblePanel
       title="Advanced fielding"
-      subtitle="Fielding metrics derived from game replays — not exposed by the public stat API. Sync processes the most-recent 100 games (older stored games are pruned) and also feeds Advanced batting in the Batting section."
+      subtitle="Fielding metrics derived from game replays. Since the July 2026 patch, replays are matchup RE-SIMULATIONS under the current engine (not recordings of the actual games), so these metrics measure expected performance in your matchups rather than what literally happened — still valid for comparing fielders and positions. Sync processes the most-recent 100 games (older stored games are pruned) and also feeds Advanced batting in the Batting section."
       headerAction={
         <div className="flex items-center gap-1.5">
           <button
