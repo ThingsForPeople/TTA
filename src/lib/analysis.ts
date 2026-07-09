@@ -95,7 +95,7 @@ function profile(p: Player): PlayerProfile | undefined {
 // won't leapfrog someone with clearly better stats.
 //
 // Values are in wOBA-equivalent units, scaled by TALENT_WEIGHT (0.15)
-// so a Lv3 talent adds ~0.006 wOBA to the slot score (more at Lv4/Lv5).
+// so a Tier-3 talent adds ~0.006 wOBA to the slot score (more at Tier 4, the max).
 
 type SlotRole = 'leadoff' | 'quality' | 'best' | 'cleanup' | 'protection' | 'lower';
 

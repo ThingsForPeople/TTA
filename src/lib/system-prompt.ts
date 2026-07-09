@@ -1,5 +1,6 @@
 import { ALL_TALENTS } from './talents';
 import { ENGINE_STAT_GLOSSARY } from './talentEffects';
+import { talentIndexById } from './talentIndex';
 
 // Engine "levers" observed in replay data — the internal stats the simulation
 // actually rolls against (distinct from the 7 displayed sim stats). Lets the AI
@@ -11,14 +12,20 @@ function buildEngineLevers(): string {
 }
 
 function buildFullTalentReference(): string {
-  const grouped: Record<string, { name: string; description: string }[]> = {};
+  // Merge official Talent Index magnitudes (per-tier "+N%" numbers scraped from
+  // tiny-teams.com/talents) into each talent line. `range` prose is the compact
+  // all-tiers form ("+6/8/10/12% Power per charge"); synergy carries the
+  // battery-partner bonus with its own numbers.
+  const grouped: Record<string, string[]> = {};
   for (const t of ALL_TALENTS) {
-    (grouped[t.category] ??= []).push({ name: t.name, description: t.description });
+    const idx = talentIndexById.get(t.id);
+    let line = `- **${t.name}**: ${t.description}`;
+    if (idx?.prose?.range) line += ` — Official numbers (Tier 1/2/3/4): ${idx.prose.range.replace(/\n/g, '; ')}`;
+    if (idx?.synergy) line += ` — Synergy ${idx.synergy.partnerCondition}: ${idx.synergy.bonus.range.replace(/\n/g, '; ')}`;
+    (grouped[t.category] ??= []).push(line);
   }
-  const sections = Object.entries(grouped).map(([cat, talents]) => {
-    const lines = talents.map((t) => `- **${t.name}**: ${t.description}`);
-    return `#### ${cat.charAt(0).toUpperCase() + cat.slice(1)}\n${lines.join('\n')}`;
-  });
+  const sections = Object.entries(grouped).map(([cat, lines]) =>
+    `#### ${cat.charAt(0).toUpperCase() + cat.slice(1)}\n${lines.join('\n')}`);
   return sections.join('\n\n');
 }
 
@@ -131,14 +138,14 @@ This is a high-whiff sim (even more post-patch: league K% ≈ 39). Observed put-
   - Acquisition ORDER matters: if a manager is unsure about a talent, advise adding it LAST so a Lacuna can later undo it without disturbing the others.
   - A Lacuna can be used to "fish" for a better talent (erase a weak last pick, hope for a stronger option among the 3 new ones), and chained until satisfied — but each use permanently burns the current last talent first, so it's only safe to fish from a talent you're willing to lose.
 - Each talent increases player salary (attribute gains raise salary too). There is a hard per-team salary cap that grows with manager level: levels run 1–10 (+1 per completed season), adding roughly $500–700k of cap per level.
-- Talent levels: Lv1 (base) through Lv5 (max). Higher levels strengthen the talent's effect, but the actual magnitude is unknown — it could be a small bump or a large one. Do NOT state or imply a specific multiplier (e.g. "1.5x" or "2x"); just say higher levels are stronger.
+- Talent levels: Tier 1 (base) through Tier 4 (max) — there is no Tier 5. Official per-tier magnitudes are published in the game's Talent Index and are included in the talent reference below (e.g. Pressure Cooker = +6/8/10/12% Power per charge). CITE these exact numbers when comparing or recommending talents. Zone (directional) and pitch-arsenal talents have NO published numbers — for those, do not invent magnitudes.
 - IMPORTANT — talent choices cost the same regardless of whether you level up an existing talent or add a brand-new one. There is NO extra cost for picking a new talent versus upgrading one already owned. Never frame new talents as "more expensive" or level-ups as "cheaper" — they are equivalent in cost. Recommend whichever gives the best effect/synergy on its own merits.
 - Pitching talents are per-pitch-type. The same zone/aim talent on different pitches counts as separate talents, NOT duplicates.
 - Batting and fielding talents affect all position players including Two Way pitchers.
 - When recommending talents, always check what the player already has, but decide between leveling up vs. adding new based purely on effectiveness and synergy — not cost.
 
 ### Measured talent value (from replay analysis)
-Values MEASURED from replays (activation → outcome), most reliable first — prefer these over intuition where available:
+Values MEASURED from replays (activation → outcome), most reliable first. These complement the official Talent Index numbers: the index says what a talent does when it fires (the stated %), the measurements say how often it fires and what actually happened on those plays — use both:
 - **Driver** (line drives) is the strongest zone hitting effect — clear gain in line-drive share and exit velo when it fires. **Dialed** (contact) is a solid, reliable second. **Popper** (fly balls) showed little measured contact-quality gain — do NOT over-rate it (roughly on par with Chopper, below Dialed). **Hacker** (more swings) is double-edged — measured slightly NEGATIVE on contact quality (more grounders, lower EV); recommend it cautiously, mainly for aggressive high-contact hitters.
 - **Mental Warfare** measured the single biggest contact-quality boost of any hitting talent (it raises the pitcher's mistake chance) — high value, best in run-producing (runners-on) slots.
 - CAVEAT: only talents that fire often enough were measurable. Always-on talents, charge/escalation builders (e.g. Pressure Cooker, Knowledge is Power), and ALL fielding talents can't yet be measured from replays — judge those on their engine mechanism, not a measured value, and say so.
