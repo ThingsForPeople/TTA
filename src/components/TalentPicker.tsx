@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ALL_TALENTS, CATEGORY_COLORS, type TalentDef } from '../lib/talents';
+import { talentMagnitude, talentMagnitudeAtTier } from '../lib/talentIndex';
 import { MAX_TALENT_LEVEL } from '../lib/playerMeta';
 import { useDropdownPosition } from '../hooks/useDropdownPosition';
 
@@ -93,7 +94,7 @@ export function TalentPicker({ selected, levels, onChange, onLevelChange, availa
                 key={t}
                 className="inline-flex items-center gap-1 rounded bg-slate-800 px-2 py-0.5 text-xs"
               >
-                <span className={catColor}>{t}</span>
+                <span className={catColor} title={def ? talentMagnitudeAtTier(def.id, lvl) ?? def.description : undefined}>{t}</span>
                 <span className="inline-flex gap-px rounded bg-slate-900 px-0.5">
                   {Array.from({ length: MAX_TALENT_LEVEL }, (_, i) => i + 1).map((n) => (
                     <button
@@ -201,6 +202,11 @@ function DropdownItem({
         </span>
       </div>
       <p className="mt-0.5 text-[10px] leading-tight text-slate-500">{talent.description}</p>
+      {talentMagnitude(talent.id) && (
+        <p className="mt-0.5 text-[10px] leading-tight text-emerald-400/80" title="Official per-tier numbers (Tier 1/2/3/4) from the game's Talent Index">
+          {talentMagnitude(talent.id)!.split('\n')[0]}
+        </p>
+      )}
     </li>
   );
 }

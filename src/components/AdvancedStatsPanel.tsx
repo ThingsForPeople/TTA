@@ -6,6 +6,7 @@ import type { AggregatedPlayer, PositionImportance, PlayerPositionSplit } from '
 import { DEFAULT_POSITION_IMPORTANCE, DEFAULT_STAT_WEIGHTS, type StatWeights } from '../lib/rosterOptimizer';
 import { maxAssignment } from '../lib/assign';
 import { OUT_OF_ZONE_CELL, zoneCellsForDirection } from '../lib/talentEffects';
+import { talentMagnitudeAtTier } from '../lib/talentIndex';
 
 interface Props {
   teamUuid: string;
@@ -608,7 +609,7 @@ function TalentView({ players }: { players: AggregatedPlayer[] }) {
             {rows.map((r, i) => (
               <tr key={r.playerId + '|' + r.name + i} className="border-b border-slate-800/60 text-slate-300 last:border-0">
                 {showPlayer && <td className="px-1.5 py-1 whitespace-nowrap text-slate-400">{r.player}</td>}
-                <td className="px-1.5 py-1 whitespace-nowrap">{r.name}</td>
+                <td className="px-1.5 py-1 whitespace-nowrap" title={talentMagnitudeAtTier(r.name, Math.max(1, r.maxTier)) ?? undefined}>{r.name}</td>
                 <td className="px-1.5 py-1 text-right font-mono">{r.perPA != null ? r.perPA.toFixed(2) : '·'}</td>
                 <td className="px-1.5 py-1 text-right font-mono text-slate-500">{r.acts}</td>
                 <td className="px-1.5 py-1 text-right font-mono" title={r.contactPct != null ? `contact rate on ${r.firedSwings} swings where it fired` : ''}>{r.contactPct != null ? Math.round(r.contactPct * 100) + '%' : '·'}</td>
