@@ -1,0 +1,1509 @@
+[
+ {
+  "id": "adrenaline_boost",
+  "displayName": "Worthy Sacrifice",
+  "description": "Speeds up after a teammate is retired.",
+  "category": "baserunning",
+  "tags": [],
+  "prose": {
+   "range": "On base, when a teammate is retired:\n+12/15/18/22% Runner Speed",
+   "perTier": {
+    "1": "On base, when a teammate is retired:\n+12% Runner Speed",
+    "2": "On base, when a teammate is retired:\n+15% Runner Speed",
+    "3": "On base, when a teammate is retired:\n+18% Runner Speed",
+    "4": "On base, when a teammate is retired:\n+22% Runner Speed"
+   },
+   "source": "override",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "at_bat_escalation",
+  "displayName": "Knowledge is Power",
+  "description": "Power grows with each pitch in the at-bat.",
+  "category": "hitting",
+  "tags": [
+   "extended_at_bat",
+   "deep_count"
+  ],
+  "prose": {
+   "range": "After 3 pitches:\n+5/5.5/6/6.5% Power per pitch",
+   "perTier": {
+    "1": "After 3 pitches:\n+5% Power per pitch",
+    "2": "After 3 pitches:\n+5.5% Power per pitch",
+    "3": "After 3 pitches:\n+6% Power per pitch",
+    "4": "After 3 pitches:\n+6.5% Power per pitch"
+   },
+   "source": "override",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "bait",
+  "displayName": "Bait",
+  "description": "Batters are more likely to chase pitches off the plate.",
+  "category": "pitching",
+  "tags": [
+   "deception"
+  ],
+  "prose": {
+   "range": "+7/14/21/28% Swing Chance out of the zone",
+   "perTier": {
+    "1": "+7% Swing Chance out of the zone",
+    "2": "+14% Swing Chance out of the zone",
+    "3": "+21% Swing Chance out of the zone",
+    "4": "+28% Swing Chance out of the zone"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "base_thief",
+  "displayName": "Thief",
+  "description": "Unlocks stealing. Higher tiers improve steal success.",
+  "category": "baserunning",
+  "tags": [
+   "stealing"
+  ],
+  "prose": {
+   "range": "Adds Base Steal\n+10/20/30/40% Steal Success",
+   "perTier": {
+    "1": "Adds Base Steal\n+10% Steal Success",
+    "2": "Adds Base Steal\n+20% Steal Success",
+    "3": "Adds Base Steal\n+30% Steal Success",
+    "4": "Adds Base Steal\n+40% Steal Success"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "battery_control",
+  "displayName": "Law & Order",
+  "description": "A pitcher who tilts steal attempts toward outs, even more when the catcher shares the battery.",
+  "category": "pitching",
+  "tags": [
+   "stealing"
+  ],
+  "prose": {
+   "range": "-2/3/4/5% Steal Success",
+   "perTier": {
+    "1": "-2% Steal Success",
+    "2": "-3% Steal Success",
+    "3": "-4% Steal Success",
+    "4": "-5% Steal Success"
+   },
+   "source": "deterministic",
+   "partnerCondition": "when your catcher also has Law & Order"
+  },
+  "synergy": {
+   "partnerCondition": "when your catcher also has Law & Order",
+   "partnerRoles": [
+    "catcher"
+   ],
+   "partnerTalent": "battery_control",
+   "bonus": {
+    "range": "-1/2/3/4% Steal Success",
+    "perTier": {
+     "1": "-1% Steal Success",
+     "2": "-2% Steal Success",
+     "3": "-3% Steal Success",
+     "4": "-4% Steal Success"
+    }
+   }
+  },
+  "zone": null
+ },
+ {
+  "id": "changeup",
+  "displayName": "Changeup",
+  "description": "Adds a changeup. Boosts velocity and movement.",
+  "category": "pitching",
+  "tags": [
+   "offspeed"
+  ],
+  "prose": {
+   "range": "Adds Changeup\n+3/5/7/9 mph Pitch Velocity on Changeups\n+6/11/15/20 Pitch Movement on Changeups",
+   "perTier": {
+    "1": "Adds Changeup\n+3 mph Pitch Velocity on Changeups\n+6 Pitch Movement on Changeups",
+    "2": "Adds Changeup\n+5 mph Pitch Velocity on Changeups\n+11 Pitch Movement on Changeups",
+    "3": "Adds Changeup\n+7 mph Pitch Velocity on Changeups\n+15 Pitch Movement on Changeups",
+    "4": "Adds Changeup\n+9 mph Pitch Velocity on Changeups\n+20 Pitch Movement on Changeups"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "cleanup_catalyst",
+  "displayName": "The Janitor",
+  "description": "Power boost when batting cleanup.",
+  "category": "hitting",
+  "tags": [
+   "cleanup"
+  ],
+  "prose": {
+   "range": "+5/7/9/12% Power as the cleanup hitter",
+   "perTier": {
+    "1": "+5% Power as the cleanup hitter",
+    "2": "+7% Power as the cleanup hitter",
+    "3": "+9% Power as the cleanup hitter",
+    "4": "+12% Power as the cleanup hitter"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "clutch_cascade",
+  "displayName": "Clutch Cascade",
+  "description": "A hit with runners on boosts the next two batters' contact, power, and swing.",
+  "category": "hitting",
+  "tags": [
+   "high_pressure",
+   "scoring_position"
+  ],
+  "prose": {
+   "range": "After a hit with runners on, the next two batters get:\n+10/14/18/22% Contact\n+6/9/12/15% Power\n+6/9/12/15% Swing Chance",
+   "perTier": {
+    "1": "After a hit with runners on, the next two batters get:\n+10% Contact\n+6% Power\n+6% Swing Chance",
+    "2": "After a hit with runners on, the next two batters get:\n+14% Contact\n+9% Power\n+9% Swing Chance",
+    "3": "After a hit with runners on, the next two batters get:\n+18% Contact\n+12% Power\n+12% Swing Chance",
+    "4": "After a hit with runners on, the next two batters get:\n+22% Contact\n+15% Power\n+15% Swing Chance"
+   },
+   "source": "override",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "confidence_shaker",
+  "displayName": "Confidence Shaker",
+  "description": "An early-count hit rattles the pitcher.",
+  "category": "hitting",
+  "tags": [
+   "early_count",
+   "mistake"
+  ],
+  "prose": {
+   "range": "After an early-count hit:\nInflicts Rattled until the at-bat ends.",
+   "perTier": {
+    "1": "After an early-count hit:\nInflicts Rattled until the at-bat ends.",
+    "2": "After an early-count hit:\nInflicts Rattled until the at-bat ends.",
+    "3": "After an early-count hit:\nInflicts Rattled until the at-bat ends.",
+    "4": "After an early-count hit:\nInflicts Rattled until the at-bat ends."
+   },
+   "source": "override",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "count_fighter",
+  "displayName": "Battler",
+  "description": "More likely to swing and foul off pitches with two strikes.",
+  "category": "hitting",
+  "tags": [
+   "behind_in_the_count",
+   "in_a_hole"
+  ],
+  "prose": {
+   "range": "With two strikes:\n+10/15/20/25% Swing Chance\n+5/8/10/15% Foul Chance",
+   "perTier": {
+    "1": "With two strikes:\n+10% Swing Chance\n+5% Foul Chance",
+    "2": "With two strikes:\n+15% Swing Chance\n+8% Foul Chance",
+    "3": "With two strikes:\n+20% Swing Chance\n+10% Foul Chance",
+    "4": "With two strikes:\n+25% Swing Chance\n+15% Foul Chance"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "curveball",
+  "displayName": "Curveball",
+  "description": "Adds a curveball. Boosts velocity and movement.",
+  "category": "pitching",
+  "tags": [
+   "breaking"
+  ],
+  "prose": {
+   "range": "Adds Curveball\n+2/3/5/6 mph Pitch Velocity on Curveballs\n+7/12/17/23 Pitch Movement on Curveballs",
+   "perTier": {
+    "1": "Adds Curveball\n+2 mph Pitch Velocity on Curveballs\n+7 Pitch Movement on Curveballs",
+    "2": "Adds Curveball\n+3 mph Pitch Velocity on Curveballs\n+12 Pitch Movement on Curveballs",
+    "3": "Adds Curveball\n+5 mph Pitch Velocity on Curveballs\n+17 Pitch Movement on Curveballs",
+    "4": "Adds Curveball\n+6 mph Pitch Velocity on Curveballs\n+23 Pitch Movement on Curveballs"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "cutter",
+  "displayName": "Cutter",
+  "description": "Adds a cutter. Boosts velocity and movement.",
+  "category": "pitching",
+  "tags": [
+   "fastball"
+  ],
+  "prose": {
+   "range": "Adds Cutter\n+4/7/11/14 mph Pitch Velocity on Cutters\n+2/4/6/8 Pitch Movement on Cutters",
+   "perTier": {
+    "1": "Adds Cutter\n+4 mph Pitch Velocity on Cutters\n+2 Pitch Movement on Cutters",
+    "2": "Adds Cutter\n+7 mph Pitch Velocity on Cutters\n+4 Pitch Movement on Cutters",
+    "3": "Adds Cutter\n+11 mph Pitch Velocity on Cutters\n+6 Pitch Movement on Cutters",
+    "4": "Adds Cutter\n+14 mph Pitch Velocity on Cutters\n+8 Pitch Movement on Cutters"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "early_count_killer",
+  "displayName": "Early Bird",
+  "description": "Contact and power boost on the first three pitches of every at-bat.",
+  "category": "hitting",
+  "tags": [
+   "early_count",
+   "first_pitch"
+  ],
+  "prose": {
+   "range": "On early-count pitches:\n+10/15/20/25% Contact\n+5/8/12/15% Power",
+   "perTier": {
+    "1": "On early-count pitches:\n+10% Contact\n+5% Power",
+    "2": "On early-count pitches:\n+15% Contact\n+8% Power",
+    "3": "On early-count pitches:\n+20% Contact\n+12% Power",
+    "4": "On early-count pitches:\n+25% Contact\n+15% Power"
+   },
+   "source": "override",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "extinguisher",
+  "displayName": "Extinguisher",
+  "description": "The harder they throw, the better this batter sees it — contact grows with every mph over 85.",
+  "category": "hitting",
+  "tags": [
+   "velocity"
+  ],
+  "prose": {
+   "range": "+0.3/0.4/0.6/0.7% Contact per mph above 85",
+   "perTier": {
+    "1": "+0.3% Contact per mph above 85",
+    "2": "+0.4% Contact per mph above 85",
+    "3": "+0.6% Contact per mph above 85",
+    "4": "+0.7% Contact per mph above 85"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "fastball",
+  "displayName": "Fastball",
+  "description": "Adds a four-seam fastball. Boosts velocity and movement.",
+  "category": "pitching",
+  "tags": [
+   "fastball"
+  ],
+  "prose": {
+   "range": "Adds Four-Seam Fastball\n+3/5/7/10 mph Pitch Velocity on Four-Seam Fastballs\n+2/4/6/8 Pitch Movement on Four-Seam Fastballs",
+   "perTier": {
+    "1": "Adds Four-Seam Fastball\n+3 mph Pitch Velocity on Four-Seam Fastballs\n+2 Pitch Movement on Four-Seam Fastballs",
+    "2": "Adds Four-Seam Fastball\n+5 mph Pitch Velocity on Four-Seam Fastballs\n+4 Pitch Movement on Four-Seam Fastballs",
+    "3": "Adds Four-Seam Fastball\n+7 mph Pitch Velocity on Four-Seam Fastballs\n+6 Pitch Movement on Four-Seam Fastballs",
+    "4": "Adds Four-Seam Fastball\n+10 mph Pitch Velocity on Four-Seam Fastballs\n+8 Pitch Movement on Four-Seam Fastballs"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "fear_me",
+  "displayName": "Fear Me",
+  "description": "Pitcher throws more balls in the first three pitches; batter resists chasing them.",
+  "category": "hitting",
+  "tags": [
+   "early_count",
+   "high_pressure"
+  ],
+  "prose": {
+   "range": "On early-count pitches:\n+15/18/22/25% Ball Chance\n-8/10/12/14% Swing Chance out of the zone",
+   "perTier": {
+    "1": "On early-count pitches:\n+15% Ball Chance\n-8% Swing Chance out of the zone",
+    "2": "On early-count pitches:\n+18% Ball Chance\n-10% Swing Chance out of the zone",
+    "3": "On early-count pitches:\n+22% Ball Chance\n-12% Swing Chance out of the zone",
+    "4": "On early-count pitches:\n+25% Ball Chance\n-14% Swing Chance out of the zone"
+   },
+   "source": "override",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "fielding.charge_it",
+  "displayName": "Charger",
+  "description": "Infielders move faster on ground balls.",
+  "category": "fielding",
+  "tags": [
+   "fielding"
+  ],
+  "prose": {
+   "range": "+20/30/40/50% Fielding Speed on grounders",
+   "perTier": {
+    "1": "+20% Fielding Speed on grounders",
+    "2": "+30% Fielding Speed on grounders",
+    "3": "+40% Fielding Speed on grounders",
+    "4": "+50% Fielding Speed on grounders"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "fielding.middle_magic",
+  "displayName": "Heads & Tails",
+  "description": "Middle infielders move faster on grounders. Bonus stacks when both SS and 2B have it.",
+  "category": "fielding",
+  "tags": [
+   "fielding"
+  ],
+  "prose": {
+   "range": "+10/13/16/20% Fielding Speed on grounders",
+   "perTier": {
+    "1": "+10% Fielding Speed on grounders",
+    "2": "+13% Fielding Speed on grounders",
+    "3": "+16% Fielding Speed on grounders",
+    "4": "+20% Fielding Speed on grounders"
+   },
+   "source": "deterministic",
+   "partnerCondition": "when SS and 2B both equip Heads & Tails"
+  },
+  "synergy": {
+   "partnerCondition": "when SS and 2B both equip Heads & Tails",
+   "partnerRoles": [
+    "shortstop",
+    "second_base"
+   ],
+   "partnerTalent": "fielding.middle_magic",
+   "bonus": {
+    "range": "+5/7/9/12% Fielding Speed",
+    "perTier": {
+     "1": "+5% Fielding Speed",
+     "2": "+7% Fielding Speed",
+     "3": "+9% Fielding Speed",
+     "4": "+12% Fielding Speed"
+    }
+   }
+  },
+  "zone": null
+ },
+ {
+  "id": "fielding.no_doubles",
+  "displayName": "No Doubles",
+  "description": "Outfielders move faster on ground balls.",
+  "category": "fielding",
+  "tags": [
+   "fielding"
+  ],
+  "prose": {
+   "range": "+20/30/40/50% Fielding Speed on grounders",
+   "perTier": {
+    "1": "+20% Fielding Speed on grounders",
+    "2": "+30% Fielding Speed on grounders",
+    "3": "+40% Fielding Speed on grounders",
+    "4": "+50% Fielding Speed on grounders"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "fielding.putaway_cannon",
+  "displayName": "Warmed Up",
+  "description": "Throw speed boost after recording an out.",
+  "category": "fielding",
+  "tags": [
+   "fielding"
+  ],
+  "prose": {
+   "range": "After recording an out:\n+10/15/20/25 mph Throw Speed",
+   "perTier": {
+    "1": "After recording an out:\n+10 mph Throw Speed",
+    "2": "After recording an out:\n+15 mph Throw Speed",
+    "3": "After recording an out:\n+20 mph Throw Speed",
+    "4": "After recording an out:\n+25 mph Throw Speed"
+   },
+   "source": "override",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "first_pitch_hunter",
+  "displayName": "Set the Tone",
+  "description": "Contact, power, and swing boost on the first pitch of every at-bat.",
+  "category": "hitting",
+  "tags": [
+   "first_pitch",
+   "early_count"
+  ],
+  "prose": {
+   "range": "On the first pitch:\n+10/15/20/25% Contact\n+5/8/12/15% Power\n+10/15/20/25% Swing Chance",
+   "perTier": {
+    "1": "On the first pitch:\n+10% Contact\n+5% Power\n+10% Swing Chance",
+    "2": "On the first pitch:\n+15% Contact\n+8% Power\n+15% Swing Chance",
+    "3": "On the first pitch:\n+20% Contact\n+12% Power\n+20% Swing Chance",
+    "4": "On the first pitch:\n+25% Contact\n+15% Power\n+25% Swing Chance"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "fish_eye",
+  "displayName": "Disciplined",
+  "description": "Less likely to chase pitches out of the zone.",
+  "category": "hitting",
+  "tags": [
+   "out_of_the_zone",
+   "deep_count"
+  ],
+  "prose": {
+   "range": "-15/20/25/30% Swing Chance out of the zone",
+   "perTier": {
+    "1": "-15% Swing Chance out of the zone",
+    "2": "-20% Swing Chance out of the zone",
+    "3": "-25% Swing Chance out of the zone",
+    "4": "-30% Swing Chance out of the zone"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "fleet_footed",
+  "displayName": "Quick Silver",
+  "description": "Faster baserunning speed.",
+  "category": "baserunning",
+  "tags": [],
+  "prose": {
+   "range": "+4/6/8/10% Runner Speed",
+   "perTier": {
+    "1": "+4% Runner Speed",
+    "2": "+6% Runner Speed",
+    "3": "+8% Runner Speed",
+    "4": "+10% Runner Speed"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "gauntlet_affix_dead_arm",
+  "displayName": "Dead Arm",
+  "description": "Pitch velocity drops from accumulated fatigue.",
+  "category": "gauntlet",
+  "tags": [
+   "pitch",
+   "velocity"
+  ],
+  "prose": {
+   "range": "-5/9/13/16 mph Pitch Velocity",
+   "perTier": {
+    "1": "-5 mph Pitch Velocity",
+    "2": "-9 mph Pitch Velocity",
+    "3": "-13 mph Pitch Velocity",
+    "4": "-16 mph Pitch Velocity"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "gauntlet_affix_heavy_bat",
+  "displayName": "Heavy Bat",
+  "description": "Contact timing is thrown off by extra bat weight.",
+  "category": "gauntlet",
+  "tags": [
+   "repeat",
+   "behind_in_the_count"
+  ],
+  "prose": {
+   "range": "-8/12/16/20% Contact",
+   "perTier": {
+    "1": "-8% Contact",
+    "2": "-12% Contact",
+    "3": "-16% Contact",
+    "4": "-20% Contact"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "gauntlet_affix_leaden_legs",
+  "displayName": "Leaden Legs",
+  "description": "Every sprint feels heavier than the last.",
+  "category": "gauntlet",
+  "tags": [
+   "stealing",
+   "low_pressure"
+  ],
+  "prose": {
+   "range": "-5/9/12/16% Runner Speed",
+   "perTier": {
+    "1": "-5% Runner Speed",
+    "2": "-9% Runner Speed",
+    "3": "-12% Runner Speed",
+    "4": "-16% Runner Speed"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "gauntlet_affix_wet_gloves",
+  "displayName": "Wet Gloves",
+  "description": "Grip suffers and throws lose power.",
+  "category": "gauntlet",
+  "tags": [
+   "fielding",
+   "high_pressure"
+  ],
+  "prose": {
+   "range": "-5/8/12/15 mph Throw Speed",
+   "perTier": {
+    "1": "-5 mph Throw Speed",
+    "2": "-8 mph Throw Speed",
+    "3": "-12 mph Throw Speed",
+    "4": "-15 mph Throw Speed"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "gauntlet_talent_heavy_lumber",
+  "displayName": "Heavy Lumber",
+  "description": "Batters cut through affix penalties with better contact.",
+  "category": "gauntlet",
+  "tags": [
+   "repeat",
+   "lineup_synergy"
+  ],
+  "prose": {
+   "range": "+12% Contact",
+   "perTier": {
+    "1": "+12% Contact",
+    "2": "+12% Contact",
+    "3": "+12% Contact",
+    "4": "+12% Contact"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "gauntlet_talent_iron_shoulder",
+  "displayName": "Iron Shoulder",
+  "description": "Pitchers gain back velocity despite gauntlet fatigue.",
+  "category": "gauntlet",
+  "tags": [
+   "pitch",
+   "velocity"
+  ],
+  "prose": {
+   "range": "+10 mph Pitch Velocity",
+   "perTier": {
+    "1": "+10 mph Pitch Velocity",
+    "2": "+10 mph Pitch Velocity",
+    "3": "+10 mph Pitch Velocity",
+    "4": "+10 mph Pitch Velocity"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "gauntlet_talent_second_wind",
+  "displayName": "Second Wind",
+  "description": "Runners recover burst and late-game legs.",
+  "category": "gauntlet",
+  "tags": [
+   "stealing",
+   "low_pressure"
+  ],
+  "prose": {
+   "range": "+10% Runner Speed",
+   "perTier": {
+    "1": "+10% Runner Speed",
+    "2": "+10% Runner Speed",
+    "3": "+10% Runner Speed",
+    "4": "+10% Runner Speed"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "gauntlet_talent_sure_grip",
+  "displayName": "Sure Grip",
+  "description": "Fielders keep strong throws under pressure.",
+  "category": "gauntlet",
+  "tags": [
+   "fielding",
+   "high_pressure"
+  ],
+  "prose": {
+   "range": "+9 mph Throw Speed",
+   "perTier": {
+    "1": "+9 mph Throw Speed",
+    "2": "+9 mph Throw Speed",
+    "3": "+9 mph Throw Speed",
+    "4": "+9 mph Throw Speed"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "grounder_speed",
+  "displayName": "Hustler",
+  "description": "Speed boost on ground balls to beat out throws.",
+  "category": "baserunning",
+  "tags": [],
+  "prose": {
+   "range": "+4/8/12/16% Runner Speed on grounders",
+   "perTier": {
+    "1": "+4% Runner Speed on grounders",
+    "2": "+8% Runner Speed on grounders",
+    "3": "+12% Runner Speed on grounders",
+    "4": "+16% Runner Speed on grounders"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "heat_wave",
+  "displayName": "High Noon",
+  "description": "Velocity boost and tougher contact in day games.",
+  "category": "pitching",
+  "tags": [
+   "velocity",
+   "day"
+  ],
+  "prose": {
+   "range": "In Day Games:\n+1/2/3/4 mph Pitch Velocity\n-9/13/17/21% Contact",
+   "perTier": {
+    "1": "In Day Games:\n+1 mph Pitch Velocity\n-9% Contact",
+    "2": "In Day Games:\n+2 mph Pitch Velocity\n-13% Contact",
+    "3": "In Day Games:\n+3 mph Pitch Velocity\n-17% Contact",
+    "4": "In Day Games:\n+4 mph Pitch Velocity\n-21% Contact"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "high_noon",
+  "displayName": "Sun Glasses",
+  "description": "Contact boost against fastballs in day games.",
+  "category": "hitting",
+  "tags": [
+   "day",
+   "fastball"
+  ],
+  "prose": {
+   "range": "+20/30/40/50% Contact in Day Games on fastballs",
+   "perTier": {
+    "1": "+20% Contact in Day Games on fastballs",
+    "2": "+30% Contact in Day Games on fastballs",
+    "3": "+40% Contact in Day Games on fastballs",
+    "4": "+50% Contact in Day Games on fastballs"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "hold_em",
+  "displayName": "Hold 'Em",
+  "description": "Runners attempt fewer steals.",
+  "category": "pitching",
+  "tags": [
+   "stealing",
+   "stretch"
+  ],
+  "prose": {
+   "range": "-10/15/20/25% Steal Attempt Rate",
+   "perTier": {
+    "1": "-10% Steal Attempt Rate",
+    "2": "-15% Steal Attempt Rate",
+    "3": "-20% Steal Attempt Rate",
+    "4": "-25% Steal Attempt Rate"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "hook_slide",
+  "displayName": "Evasive",
+  "description": "Improves odds in close plays at the bag.",
+  "category": "baserunning",
+  "tags": [],
+  "prose": {
+   "range": "-20/30/40/50% Close Play Chance",
+   "perTier": {
+    "1": "-20% Close Play Chance",
+    "2": "-30% Close Play Chance",
+    "3": "-40% Close Play Chance",
+    "4": "-50% Close Play Chance"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "hot_potato",
+  "displayName": "Hot Potato",
+  "description": "Catches build momentum, quickening the next throw.",
+  "category": "fielding",
+  "tags": [
+   "fielding",
+   "chain"
+  ],
+  "prose": {
+   "range": "+8/9/10/11% Release Speed\nEach catch by a fielder with Hot Potato adds, up to 3:\n+4/4.5/5/5.5% Release Speed per catch\n+20/22/24/26% Quick Release Chance per catch",
+   "perTier": {
+    "1": "+8% Release Speed\nEach catch by a fielder with Hot Potato adds, up to 3:\n+4% Release Speed per catch\n+20% Quick Release Chance per catch",
+    "2": "+9% Release Speed\nEach catch by a fielder with Hot Potato adds, up to 3:\n+4.5% Release Speed per catch\n+22% Quick Release Chance per catch",
+    "3": "+10% Release Speed\nEach catch by a fielder with Hot Potato adds, up to 3:\n+5% Release Speed per catch\n+24% Quick Release Chance per catch",
+    "4": "+11% Release Speed\nEach catch by a fielder with Hot Potato adds, up to 3:\n+5.5% Release Speed per catch\n+26% Quick Release Chance per catch"
+   },
+   "source": "override",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "hot_streak",
+  "displayName": "Breakout Season",
+  "description": "Contact and power boost when batting over .300 on the season.",
+  "category": "hitting",
+  "tags": [
+   "scoring_position"
+  ],
+  "prose": {
+   "range": "While batting .300 or higher:\n+15/18/21/24% Contact\n+10/12/14/16% Power",
+   "perTier": {
+    "1": "While batting .300 or higher:\n+15% Contact\n+10% Power",
+    "2": "While batting .300 or higher:\n+18% Contact\n+12% Power",
+    "3": "While batting .300 or higher:\n+21% Contact\n+14% Power",
+    "4": "While batting .300 or higher:\n+24% Contact\n+16% Power"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "ice_strike",
+  "displayName": "Hard to Handle",
+  "description": "Slows the initial fielder's throw release on batted balls.",
+  "category": "hitting",
+  "tags": [
+   "disrupt"
+  ],
+  "prose": {
+   "range": "Inflicts Iced until the at-bat ends.",
+   "perTier": {
+    "1": "Inflicts Iced until the at-bat ends.",
+    "2": "Inflicts Iced until the at-bat ends.",
+    "3": "Inflicts Iced until the at-bat ends.",
+    "4": "Inflicts Iced until the at-bat ends."
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "ice_water",
+  "displayName": "Mental Warfare",
+  "description": "Hits rattle the opposing pitcher — longer with runners on.",
+  "category": "hitting",
+  "tags": [
+   "high_pressure"
+  ],
+  "prose": {
+   "range": "Inflicts Rattled\n — after a hit with the bases empty, until the at-bat ends\n — after a hit with runners on, for the next 2 at-bats\n — after a hit with runners in scoring position, for the next 3 at-bats",
+   "perTier": {
+    "1": "Inflicts Rattled\n — after a hit with the bases empty, until the at-bat ends\n — after a hit with runners on, for the next 2 at-bats\n — after a hit with runners in scoring position, for the next 3 at-bats",
+    "2": "Inflicts Rattled\n — after a hit with the bases empty, until the at-bat ends\n — after a hit with runners on, for the next 2 at-bats\n — after a hit with runners in scoring position, for the next 3 at-bats",
+    "3": "Inflicts Rattled\n — after a hit with the bases empty, until the at-bat ends\n — after a hit with runners on, for the next 2 at-bats\n — after a hit with runners in scoring position, for the next 3 at-bats",
+    "4": "Inflicts Rattled\n — after a hit with the bases empty, until the at-bat ends\n — after a hit with runners on, for the next 2 at-bats\n — after a hit with runners in scoring position, for the next 3 at-bats"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "knuckleball",
+  "displayName": "Knuckleball",
+  "description": "Adds a knuckleball. Boosts movement but increases mistake chance.",
+  "category": "pitching",
+  "tags": [
+   "offspeed",
+   "mistake"
+  ],
+  "prose": {
+   "range": "Adds Knuckleball\n+1/2/3/4 mph Pitch Velocity on Knuckleballs\n+6/11/16/21 Pitch Movement on Knuckleballs\n-15/17/19/21% Contact on Knuckleballs\n+15/17/19/21% Mistake Chance on Knuckleballs",
+   "perTier": {
+    "1": "Adds Knuckleball\n+1 mph Pitch Velocity on Knuckleballs\n+6 Pitch Movement on Knuckleballs\n-15% Contact on Knuckleballs\n+15% Mistake Chance on Knuckleballs",
+    "2": "Adds Knuckleball\n+2 mph Pitch Velocity on Knuckleballs\n+11 Pitch Movement on Knuckleballs\n-17% Contact on Knuckleballs\n+17% Mistake Chance on Knuckleballs",
+    "3": "Adds Knuckleball\n+3 mph Pitch Velocity on Knuckleballs\n+16 Pitch Movement on Knuckleballs\n-19% Contact on Knuckleballs\n+19% Mistake Chance on Knuckleballs",
+    "4": "Adds Knuckleball\n+4 mph Pitch Velocity on Knuckleballs\n+21 Pitch Movement on Knuckleballs\n-21% Contact on Knuckleballs\n+21% Mistake Chance on Knuckleballs"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "leadoff_catalyst",
+  "displayName": "Table Setter",
+  "description": "Contact boost when leading off an inning.",
+  "category": "hitting",
+  "tags": [
+   "leadoff"
+  ],
+  "prose": {
+   "range": "+4/6/8/10% Contact as the leadoff hitter",
+   "perTier": {
+    "1": "+4% Contact as the leadoff hitter",
+    "2": "+6% Contact as the leadoff hitter",
+    "3": "+8% Contact as the leadoff hitter",
+    "4": "+10% Contact as the leadoff hitter"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "lefty_edge",
+  "displayName": "Lefty's Edge",
+  "description": "Control boost against left-handed batters.",
+  "category": "pitching",
+  "tags": [
+   "left_handed"
+  ],
+  "prose": {
+   "range": "+4/8/12/16% Overpowered Chance vs Left-Handed Batters",
+   "perTier": {
+    "1": "+4% Overpowered Chance vs Left-Handed Batters",
+    "2": "+8% Overpowered Chance vs Left-Handed Batters",
+    "3": "+12% Overpowered Chance vs Left-Handed Batters",
+    "4": "+16% Overpowered Chance vs Left-Handed Batters"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "lefty_loosey",
+  "displayName": "Lefty Loosey",
+  "description": "Left-handed batters gain contact and power against right-handed pitchers.",
+  "category": "hitting",
+  "tags": [
+   "left_handed",
+   "opposite_handed"
+  ],
+  "prose": {
+   "range": "Vs Right-Handed Pitchers:\n+8/10/12/14% Contact\n+4/5/6/7% Power",
+   "perTier": {
+    "1": "Vs Right-Handed Pitchers:\n+8% Contact\n+4% Power",
+    "2": "Vs Right-Handed Pitchers:\n+10% Contact\n+5% Power",
+    "3": "Vs Right-Handed Pitchers:\n+12% Contact\n+6% Power",
+    "4": "Vs Right-Handed Pitchers:\n+14% Contact\n+7% Power"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "master_of_none",
+  "displayName": "Master of None",
+  "description": "A deep arsenal sharpens every pitch — velocity and movement grow with each unique pitch the pitcher has unlocked.",
+  "category": "pitching",
+  "tags": [
+   "pitch",
+   "velocity"
+  ],
+  "prose": {
+   "range": "+0.2/0.3/0.4/0.5 mph Pitch Velocity per unique pitch\n+1.5/2/2.5/3 Pitch Movement per unique pitch",
+   "perTier": {
+    "1": "+0.2 mph Pitch Velocity per unique pitch\n+1.5 Pitch Movement per unique pitch",
+    "2": "+0.3 mph Pitch Velocity per unique pitch\n+2 Pitch Movement per unique pitch",
+    "3": "+0.4 mph Pitch Velocity per unique pitch\n+2.5 Pitch Movement per unique pitch",
+    "4": "+0.5 mph Pitch Velocity per unique pitch\n+3 Pitch Movement per unique pitch"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "night_owl",
+  "displayName": "Night Owl",
+  "description": "Contact boost against breaking and off-speed pitches in night games.",
+  "category": "hitting",
+  "tags": [
+   "night",
+   "breaking",
+   "offspeed"
+  ],
+  "prose": {
+   "range": "+20/30/40/50% Contact in Night Games on breaking balls\n+8/10/12/14% Contact in Night Games on off-speed pitches",
+   "perTier": {
+    "1": "+20% Contact in Night Games on breaking balls\n+8% Contact in Night Games on off-speed pitches",
+    "2": "+30% Contact in Night Games on breaking balls\n+10% Contact in Night Games on off-speed pitches",
+    "3": "+40% Contact in Night Games on breaking balls\n+12% Contact in Night Games on off-speed pitches",
+    "4": "+50% Contact in Night Games on breaking balls\n+14% Contact in Night Games on off-speed pitches"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "pattern_recognition",
+  "displayName": "Pattern Recognition",
+  "description": "Contact and power increase after seeing the same pitch type and zone three times.",
+  "category": "hitting",
+  "tags": [
+   "repeat",
+   "deep_count",
+   "extended_at_bat"
+  ],
+  "prose": {
+   "range": "After seeing the same pitch and zone 3+ times this game:\n+8/12/15/18% Contact\n+15/20/25/30% Power",
+   "perTier": {
+    "1": "After seeing the same pitch and zone 3+ times this game:\n+8% Contact\n+15% Power",
+    "2": "After seeing the same pitch and zone 3+ times this game:\n+12% Contact\n+20% Power",
+    "3": "After seeing the same pitch and zone 3+ times this game:\n+15% Contact\n+25% Power",
+    "4": "After seeing the same pitch and zone 3+ times this game:\n+18% Contact\n+30% Power"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "pitchers_bane",
+  "displayName": "Exhausting",
+  "description": "Each pitch in the at-bat increases the pitcher's mistake chance.",
+  "category": "hitting",
+  "tags": [
+   "patience",
+   "disrupt"
+  ],
+  "prose": {
+   "range": "+2/3/4/5% Mistake Chance per pitch",
+   "perTier": {
+    "1": "+2% Mistake Chance per pitch",
+    "2": "+3% Mistake Chance per pitch",
+    "3": "+4% Mistake Chance per pitch",
+    "4": "+5% Mistake Chance per pitch"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "platoon_offspeed_tracker",
+  "displayName": "Off Speed Tracker",
+  "description": "Better contact against off-speed pitches.",
+  "category": "hitting",
+  "tags": [
+   "offspeed"
+  ],
+  "prose": {
+   "range": "+5/7/8/10% Contact on off-speed pitches",
+   "perTier": {
+    "1": "+5% Contact on off-speed pitches",
+    "2": "+7% Contact on off-speed pitches",
+    "3": "+8% Contact on off-speed pitches",
+    "4": "+10% Contact on off-speed pitches"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "pop_time",
+  "displayName": "Pop Time",
+  "description": "Faster throw to second on steal attempts.",
+  "category": "fielding",
+  "tags": [
+   "fielding",
+   "stealing"
+  ],
+  "prose": {
+   "range": "-5/10/15/20% Steal Success",
+   "perTier": {
+    "1": "-5% Steal Success",
+    "2": "-10% Steal Success",
+    "3": "-15% Steal Success",
+    "4": "-20% Steal Success"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "pressure_cooker",
+  "displayName": "Clutch",
+  "description": "Contact and power boost with runners on base.",
+  "category": "hitting",
+  "tags": [
+   "high_pressure",
+   "scoring_position"
+  ],
+  "prose": {
+   "range": "With runners on:\n+15/19/23/27% Contact\n+12/16/20/24% Power",
+   "perTier": {
+    "1": "With runners on:\n+15% Contact\n+12% Power",
+    "2": "With runners on:\n+19% Contact\n+16% Power",
+    "3": "With runners on:\n+23% Contact\n+20% Power",
+    "4": "With runners on:\n+27% Contact\n+24% Power"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "quick_jump",
+  "displayName": "Anticipation",
+  "description": "Better jump timing on steal attempts.",
+  "category": "baserunning",
+  "tags": [
+   "stealing"
+  ],
+  "prose": {
+   "range": "+3/6/9/12% Steal Jump Quality",
+   "perTier": {
+    "1": "+3% Steal Jump Quality",
+    "2": "+6% Steal Jump Quality",
+    "3": "+9% Steal Jump Quality",
+    "4": "+12% Steal Jump Quality"
+   },
+   "source": "override",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "quick_pitch",
+  "displayName": "Quick Pitch",
+  "description": "Faster delivery gives runners worse jump timing on steals.",
+  "category": "pitching",
+  "tags": [
+   "stealing",
+   "stretch"
+  ],
+  "prose": {
+   "range": "-5/10/15/20% Base-Stealer Jump Quality",
+   "perTier": {
+    "1": "-5% Base-Stealer Jump Quality",
+    "2": "-10% Base-Stealer Jump Quality",
+    "3": "-15% Base-Stealer Jump Quality",
+    "4": "-20% Base-Stealer Jump Quality"
+   },
+   "source": "override",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "quick_strike_adaptation",
+  "displayName": "Waste No Time",
+  "description": "Each early-count hit boosts contact for the rest of the game.",
+  "category": "hitting",
+  "tags": [
+   "early_count",
+   "pitch_count"
+  ],
+  "prose": {
+   "range": "+5/6/7/8% Contact per early-count hit",
+   "perTier": {
+    "1": "+5% Contact per early-count hit",
+    "2": "+6% Contact per early-count hit",
+    "3": "+7% Contact per early-count hit",
+    "4": "+8% Contact per early-count hit"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "rally_igniter",
+  "displayName": "Rally Time",
+  "description": "An early-count hit boosts the next batter's swing, contact, and power.",
+  "category": "hitting",
+  "tags": [
+   "early_count"
+  ],
+  "prose": {
+   "range": "After an early-count hit, the next batter gets:\n+10/15/20/25% Contact\n+10/15/20/25% Power\n+5/8/10/12% Swing Chance\nInflicts Rattled until the at-bat ends.",
+   "perTier": {
+    "1": "After an early-count hit, the next batter gets:\n+10% Contact\n+10% Power\n+5% Swing Chance\nInflicts Rattled until the at-bat ends.",
+    "2": "After an early-count hit, the next batter gets:\n+15% Contact\n+15% Power\n+8% Swing Chance\nInflicts Rattled until the at-bat ends.",
+    "3": "After an early-count hit, the next batter gets:\n+20% Contact\n+20% Power\n+10% Swing Chance\nInflicts Rattled until the at-bat ends.",
+    "4": "After an early-count hit, the next batter gets:\n+25% Contact\n+25% Power\n+12% Swing Chance\nInflicts Rattled until the at-bat ends."
+   },
+   "source": "override",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "release_valve",
+  "displayName": "Pressure Cooker",
+  "description": "Outs with runners on build charges. A hit discharges them for a power surge.",
+  "category": "hitting",
+  "tags": [
+   "high_pressure",
+   "in_a_hole"
+  ],
+  "prose": {
+   "range": "+6/8/10/12% Power per charge\nAn out with runners on banks a charge. A hit clears them.",
+   "perTier": {
+    "1": "+6% Power per charge\nAn out with runners on banks a charge. A hit clears them.",
+    "2": "+8% Power per charge\nAn out with runners on banks a charge. A hit clears them.",
+    "3": "+10% Power per charge\nAn out with runners on banks a charge. A hit clears them.",
+    "4": "+12% Power per charge\nAn out with runners on banks a charge. A hit clears them."
+   },
+   "source": "override",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "righty_edge",
+  "displayName": "Righty's Edge",
+  "description": "Control boost against right-handed batters.",
+  "category": "pitching",
+  "tags": [
+   "right_handed"
+  ],
+  "prose": {
+   "range": "+4/8/12/16% Overpowered Chance vs Right-Handed Batters",
+   "perTier": {
+    "1": "+4% Overpowered Chance vs Right-Handed Batters",
+    "2": "+8% Overpowered Chance vs Right-Handed Batters",
+    "3": "+12% Overpowered Chance vs Right-Handed Batters",
+    "4": "+16% Overpowered Chance vs Right-Handed Batters"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "righty_tighty",
+  "displayName": "Righty Tighty",
+  "description": "Right-handed batters gain contact and power against left-handed pitchers.",
+  "category": "hitting",
+  "tags": [
+   "right_handed",
+   "opposite_handed"
+  ],
+  "prose": {
+   "range": "Vs Left-Handed Pitchers:\n+8/10/12/14% Contact\n+4/5/6/7% Power",
+   "perTier": {
+    "1": "Vs Left-Handed Pitchers:\n+8% Contact\n+4% Power",
+    "2": "Vs Left-Handed Pitchers:\n+10% Contact\n+5% Power",
+    "3": "Vs Left-Handed Pitchers:\n+12% Contact\n+6% Power",
+    "4": "Vs Left-Handed Pitchers:\n+14% Contact\n+7% Power"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "sinker",
+  "displayName": "Sinker",
+  "description": "Adds a sinker. Boosts velocity and movement.",
+  "category": "pitching",
+  "tags": [
+   "fastball"
+  ],
+  "prose": {
+   "range": "Adds Sinker\n+3/5/8/10 mph Pitch Velocity on Sinkers\n+4/7/10/13 Pitch Movement on Sinkers",
+   "perTier": {
+    "1": "Adds Sinker\n+3 mph Pitch Velocity on Sinkers\n+4 Pitch Movement on Sinkers",
+    "2": "Adds Sinker\n+5 mph Pitch Velocity on Sinkers\n+7 Pitch Movement on Sinkers",
+    "3": "Adds Sinker\n+8 mph Pitch Velocity on Sinkers\n+10 Pitch Movement on Sinkers",
+    "4": "Adds Sinker\n+10 mph Pitch Velocity on Sinkers\n+13 Pitch Movement on Sinkers"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "slider",
+  "displayName": "Slider",
+  "description": "Adds a slider. Boosts velocity and movement.",
+  "category": "pitching",
+  "tags": [
+   "breaking"
+  ],
+  "prose": {
+   "range": "Adds Slider\n+3/5/7/9 mph Pitch Velocity on Sliders\n+5/9/13/17 Pitch Movement on Sliders",
+   "perTier": {
+    "1": "Adds Slider\n+3 mph Pitch Velocity on Sliders\n+5 Pitch Movement on Sliders",
+    "2": "Adds Slider\n+5 mph Pitch Velocity on Sliders\n+9 Pitch Movement on Sliders",
+    "3": "Adds Slider\n+7 mph Pitch Velocity on Sliders\n+13 Pitch Movement on Sliders",
+    "4": "Adds Slider\n+9 mph Pitch Velocity on Sliders\n+17 Pitch Movement on Sliders"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "splitter",
+  "displayName": "Splitter",
+  "description": "Adds a splitter. Boosts velocity and movement.",
+  "category": "pitching",
+  "tags": [
+   "offspeed"
+  ],
+  "prose": {
+   "range": "Adds Splitter\n+3/5/7/9 mph Pitch Velocity on Splitters\n+5/8/12/16 Pitch Movement on Splitters",
+   "perTier": {
+    "1": "Adds Splitter\n+3 mph Pitch Velocity on Splitters\n+5 Pitch Movement on Splitters",
+    "2": "Adds Splitter\n+5 mph Pitch Velocity on Splitters\n+8 Pitch Movement on Splitters",
+    "3": "Adds Splitter\n+7 mph Pitch Velocity on Splitters\n+12 Pitch Movement on Splitters",
+    "4": "Adds Splitter\n+9 mph Pitch Velocity on Splitters\n+16 Pitch Movement on Splitters"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "stretch_control",
+  "displayName": "Composure",
+  "description": "Fewer mistakes when pitching with runners on base.",
+  "category": "pitching",
+  "tags": [
+   "stretch"
+  ],
+  "prose": {
+   "range": "-6/9/12/15% Mistake Chance with runners on",
+   "perTier": {
+    "1": "-6% Mistake Chance with runners on",
+    "2": "-9% Mistake Chance with runners on",
+    "3": "-12% Mistake Chance with runners on",
+    "4": "-15% Mistake Chance with runners on"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "sweet_tooth",
+  "displayName": "Sweet Tooth",
+  "description": "Boosts sweet-spot authority, increasing homerun chance on contact.",
+  "category": "hitting",
+  "tags": [],
+  "prose": {
+   "range": "+5/10/15/20% Home Run Chance",
+   "perTier": {
+    "1": "+5% Home Run Chance",
+    "2": "+10% Home Run Chance",
+    "3": "+15% Home Run Chance",
+    "4": "+20% Home Run Chance"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "two_seam_fastball",
+  "displayName": "Two-Seam Fastball",
+  "description": "Adds a two-seam fastball. Boosts velocity and movement.",
+  "category": "pitching",
+  "tags": [
+   "fastball"
+  ],
+  "prose": {
+   "range": "Adds Two-Seam Fastball\n+3/6/8/11 mph Pitch Velocity on Two-Seam Fastballs\n+4/8/11/15 Pitch Movement on Two-Seam Fastballs",
+   "perTier": {
+    "1": "Adds Two-Seam Fastball\n+3 mph Pitch Velocity on Two-Seam Fastballs\n+4 Pitch Movement on Two-Seam Fastballs",
+    "2": "Adds Two-Seam Fastball\n+6 mph Pitch Velocity on Two-Seam Fastballs\n+8 Pitch Movement on Two-Seam Fastballs",
+    "3": "Adds Two-Seam Fastball\n+8 mph Pitch Velocity on Two-Seam Fastballs\n+11 Pitch Movement on Two-Seam Fastballs",
+    "4": "Adds Two-Seam Fastball\n+11 mph Pitch Velocity on Two-Seam Fastballs\n+15 Pitch Movement on Two-Seam Fastballs"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "under_the_lights",
+  "displayName": "Spotlights",
+  "description": "Movement boost in night games.",
+  "category": "pitching",
+  "tags": [
+   "night"
+  ],
+  "prose": {
+   "range": "+8/10/12/14 Pitch Movement in Night Games",
+   "perTier": {
+    "1": "+8 Pitch Movement in Night Games",
+    "2": "+10 Pitch Movement in Night Games",
+    "3": "+12 Pitch Movement in Night Games",
+    "4": "+14 Pitch Movement in Night Games"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ },
+ {
+  "id": "wind_up_power",
+  "displayName": "Special Delivery",
+  "description": "Velocity boost when pitching with bases empty.",
+  "category": "pitching",
+  "tags": [
+   "wind_up"
+  ],
+  "prose": {
+   "range": "+1/2/3/4 mph Pitch Velocity with the bases empty",
+   "perTier": {
+    "1": "+1 mph Pitch Velocity with the bases empty",
+    "2": "+2 mph Pitch Velocity with the bases empty",
+    "3": "+3 mph Pitch Velocity with the bases empty",
+    "4": "+4 mph Pitch Velocity with the bases empty"
+   },
+   "source": "deterministic",
+   "partnerCondition": null
+  },
+  "synergy": null,
+  "zone": null
+ }
+]

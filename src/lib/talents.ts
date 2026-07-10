@@ -141,6 +141,11 @@ const TALENTS: TalentDef[] = [
   { id: 'zone:outside:swing', name: 'Outside Ice', description: 'Pitches of this type in the outside zone freeze batters looking at strike three.', category: 'pitching' },
   { id: 'zone:outside:whiffs', name: 'Outside Punch', description: 'Pitches of this type in the outside zone generate more swings and misses.', category: 'pitching' },
   { id: 'zone:outside:control', name: 'Outside Command', description: 'Pitches of this type in the outside zone overpower batters more often.', category: 'pitching' },
+  // Added from the official Talent Index site update (2026-07-09) — magnitudes
+  // live in talentIndex.json. (Gauntlet-mode talents/afflictions are in the
+  // index too but intentionally excluded here: not pickable in normal play.)
+  { id: 'extinguisher', name: 'Extinguisher', description: 'The harder they throw, the better this batter sees it — contact grows with every mph over 85.', category: 'hitting' },
+  { id: 'master_of_none', name: 'Master of None', description: 'A deep arsenal sharpens every pitch — velocity and movement grow with each unique pitch the pitcher has unlocked.', category: 'pitching' },
 ];
 
 export const ALL_TALENTS = TALENTS;
