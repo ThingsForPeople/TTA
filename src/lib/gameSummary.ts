@@ -17,7 +17,7 @@ function resultsStr(results: Record<string, number>): string {
 // Since the 2026-07-08 game patch, replays are re-simulations, not recordings —
 // every AI context built from one must carry this framing exactly once.
 const RESIM_NOTE =
-  'NOTE: since the 2026-07-08 game patch, replays are RE-SIMULATIONS of the matchup under the current engine, not recordings — the score/lines here may differ from the official box score. Treat this as a representative sample of how these teams match up (process quality, tendencies), NOT as the literal game that happened. Do not reconcile it against the official result.';
+  'NOTE: since the 2026-07-08 game patch, replays are RE-SIMULATIONS, not recordings. Verified: they use the GAME-TIME rosters, fielding positions, batting order, and talent loadouts (identical to the official box score in all audited games) — only the play-by-play OUTCOME is re-rolled under the current engine, so the score/lines here may differ from the official result. Treat this as a faithful re-roll of the same matchup (process quality, tendencies), NOT as the literal game that happened. Do not reconcile it against the official result.';
 
 // Concatenate several games into one context for a multi-game (matchup) read.
 export function buildGamesContext(evals: ReplayEvaluation[], opponentName?: string): string {
