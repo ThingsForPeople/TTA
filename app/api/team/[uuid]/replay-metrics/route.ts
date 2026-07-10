@@ -420,13 +420,13 @@ function applyRangeCurve(rows: { position: number | null; metrics: PlayerGameMet
 }
 
 function aggregate(rows: { playerId: string; playerName: string; position: number | null; metrics: PlayerGameMetrics }[]): AggregatedPlayer[] {
-  type TStat = { acts: number; effects: number; stacked: number; maxTier: number; firedSwings: number; firedContact: number };
-  const acc = new Map<string, { name: string; games: number; sum: Sums; maxEV: number; armMax: number; byPos: Map<number, { games: number; sum: Sums }>; talents: Map<string, TStat> }>();
+  type TStat = { acts: number; effects: number; stacked: number; maxTier: number; firedSwings: number; firedContact: number; activeSwings: number; activeContact: number };
+  const acc = new Map<string, { name: string; games: number; sum: Sums; maxEV: number; armMax: number; byPos: Map<number, { games: number; sum: Sums }>; talents: Map<string, TStat>; zonesSeen: Record<string, number> }>();
   for (const r of rows) {
     const m = r.metrics;
     let a = acc.get(r.playerId);
     if (!a) {
-      a = { name: r.playerName, games: 0, sum: zeroSums(), maxEV: 0, armMax: 0, byPos: new Map(), talents: new Map() };
+      a = { name: r.playerName, games: 0, sum: zeroSums(), maxEV: 0, armMax: 0, byPos: new Map(), talents: new Map(), zonesSeen: {} as Record<string, number> };
       acc.set(r.playerId, a);
     }
     a.games++;
@@ -434,15 +434,19 @@ function aggregate(rows: { playerId: string; playerName: string; position: numbe
     // Accumulate per-talent triggering + stacking across games.
     if (m.talentActs) {
       for (const [nm, v] of Object.entries(m.talentActs)) {
-        const e = a.talents.get(nm) ?? { acts: 0, effects: 0, stacked: 0, maxTier: 0, firedSwings: 0, firedContact: 0 };
+        const e = a.talents.get(nm) ?? { acts: 0, effects: 0, stacked: 0, maxTier: 0, firedSwings: 0, firedContact: 0, activeSwings: 0, activeContact: 0 };
         e.acts += v.acts ?? 0; e.effects += v.effects ?? 0; e.stacked += v.stacked ?? 0;
         e.maxTier = Math.max(e.maxTier, v.maxTier ?? 0);
         e.firedSwings += v.firedSwings ?? 0; e.firedContact += v.firedContact ?? 0;
+        e.activeSwings += v.activeSwings ?? 0; e.activeContact += v.activeContact ?? 0;
         a.talents.set(nm, e);
       }
     }
     a.maxEV = Math.max(a.maxEV, m.evMax ?? 0);
     a.armMax = Math.max(a.armMax, m.throwSpeedMax ?? 0);
+    if (m.zonesSeen) {
+      for (const [z, n] of Object.entries(m.zonesSeen)) a.zonesSeen[z] = (a.zonesSeen[z] ?? 0) + (n ?? 0);
+    }
     // Per-position split: only count a game toward a position if the player
     // actually fielded there (had a chance or recorded an out/steal-defense).
     // Catcher (2) is the exception: by model design it has no batted-ball
@@ -492,6 +496,17 @@ function aggregate(rows: { playerId: string; playerName: string; position: numbe
       rangePae: s.rangeXOuts > 0 ? Math.round((s.rangeEngagedOuts - s.rangeXOuts) * 10) / 10 : null,
       rangePaePerGame: s.rangeXOuts > 0 && a.games > 0 ? Math.round(((s.rangeEngagedOuts - s.rangeXOuts) / a.games) * 100) / 100 : null,
       unreached: s.unreached,
+      throwMargin: s.throwMarginCount > 0 ? Math.round((s.throwMarginSum / s.throwMarginCount) * 100) / 100 : null,
+      throwMarginN: s.throwMarginCount,
+      runMargin: s.runMarginCount > 0 ? Math.round((s.runMarginSum / s.runMarginCount) * 100) / 100 : null,
+      runMarginN: s.runMarginCount,
+      bobbles: s.bobbles,
+      releaseGreatRate: s.releaseBanded > 0 ? Math.round((s.releaseGreat / s.releaseBanded) * 1000) / 1000 : null,
+      jumpGreat: s.jumpGreat, jumpSlow: s.jumpSlow, jumpTotal: s.jumpTotal,
+      leadoffAvg: s.leadoffCount > 0 ? Math.round((s.leadoffSum / s.leadoffCount) * 10) / 10 : null,
+      veloFacedAvg: s.veloFacedCount > 0 ? Math.round((s.veloFacedSum / s.veloFacedCount) * 10) / 10 : null,
+      over85PerPitch: s.veloFacedCount > 0 ? Math.round((s.veloOver85Sum / s.veloFacedCount) * 100) / 100 : null,
+      zonesSeen: Object.keys(a.zonesSeen).length ? a.zonesSeen : null,
       basesSaved: s.basesSavedOpps > 0 ? Math.round(s.basesSavedSum * 100) / 100 : null,
       basesSavedPerGame: s.basesSavedOpps > 0 && a.games > 0 ? Math.round((s.basesSavedSum / a.games) * 100) / 100 : null,
       basesSavedOpps: s.basesSavedOpps,
@@ -500,7 +515,7 @@ function aggregate(rows: { playerId: string; playerName: string; position: numbe
       csRate: s.stealAttempts > 0 ? Math.round((s.caughtStealing / s.stealAttempts) * 1000) / 1000 : null,
       dp: s.dpInvolved, dpStarted: s.dpStarted, dpTurned: s.dpTurned, dpFinished: s.dpFinished, dpOpp: s.dpOpp,
       talents: [...a.talents.entries()]
-        .map(([name, v]) => ({ name, acts: v.acts, effects: v.effects, stacked: v.stacked, maxTier: v.maxTier, firedSwings: v.firedSwings, firedContact: v.firedContact, perGame: a.games > 0 ? Math.round((v.acts / a.games) * 10) / 10 : 0 }))
+        .map(([name, v]) => ({ name, acts: v.acts, effects: v.effects, stacked: v.stacked, maxTier: v.maxTier, firedSwings: v.firedSwings, firedContact: v.firedContact, activeSwings: v.activeSwings, activeContact: v.activeContact, perGame: a.games > 0 ? Math.round((v.acts / a.games) * 10) / 10 : 0 }))
         .sort((x, y) => y.acts - x.acts),
       byPosition,
     });
@@ -518,6 +533,10 @@ const NUMERIC_KEYS: (keyof PlayerGameMetrics)[] = [
   'expectedOuts', 'engagedOuts', 'leverageSum', 'basesSavedSum', 'basesSavedOpps', 'stealAttempts', 'caughtStealing',
   'dpInvolved', 'dpStarted', 'dpTurned', 'dpFinished', 'dpOpp',
   'unreached', 'rangeXOuts', 'rangeEngagedOuts',
+  'throwMarginSum', 'throwMarginCount', 'runMarginSum', 'runMarginCount',
+  'releaseGreat', 'releaseSlow', 'releaseBanded', 'bobbles',
+  'jumpGreat', 'jumpSlow', 'jumpTotal', 'leadoffSum', 'leadoffCount',
+  'veloFacedSum', 'veloFacedCount', 'veloOver85Sum',
 ];
 
 // GET — aggregated advanced stats across stored replay metrics.

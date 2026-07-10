@@ -43,6 +43,11 @@ export interface PitchTypeStat {
   swings: number;
   whiffs: number;
   inPlay: number;
+  // 2026-07-09: engine "overpower" roll (decoded: 82% whiff on swings when set
+  // vs 49% when not — the lever Command talents push) + velocity (mph-like).
+  overpowered: number;
+  veloSum: number;
+  veloCount: number;
 }
 
 export interface PitcherEval {
@@ -55,6 +60,7 @@ export interface PitcherEval {
   balls: number;
   inPlay: number;
   mistakes: number;
+  overpowered: number; // pitches where the engine's overpower roll fired
   byType: PitchTypeStat[];
 }
 
@@ -319,7 +325,7 @@ export function evaluateReplay(raw: any, ourTeamId?: string): ReplayEvaluation {
       p = {
         playerId: id,
         name: playerById.get(id)?.name ?? id,
-        pitches: 0, swings: 0, whiffs: 0, calledStrikes: 0, balls: 0, inPlay: 0, mistakes: 0,
+        pitches: 0, swings: 0, whiffs: 0, calledStrikes: 0, balls: 0, inPlay: 0, mistakes: 0, overpowered: 0,
         byType: [], _types: new Map(),
       };
       pitchers.set(id, p);
@@ -337,6 +343,8 @@ export function evaluateReplay(raw: any, ourTeamId?: string): ReplayEvaluation {
     // Segment-level pitch info (each pitch segment has exactly one pitch.thrown).
     let segPitchType: string | undefined;
     let segMistake = false;
+    let segOverpowered = false;
+    let segVelocity: number | undefined;
     let sawPitch = false;
     // Post-patch effect.activated dedup: first effect of a (player,talent) in a
     // segment is the activation; the rest are extra effects of that trigger.
@@ -346,6 +354,8 @@ export function evaluateReplay(raw: any, ourTeamId?: string): ReplayEvaluation {
         sawPitch = true;
         segPitchType = ev.payload?.pitchType;
         segMistake = !!ev.payload?.mistake;
+        segOverpowered = !!ev.payload?.overpowered;
+        segVelocity = typeof ev.payload?.velocity === 'number' ? ev.payload.velocity : undefined;
       }
     }
 
@@ -354,13 +364,16 @@ export function evaluateReplay(raw: any, ourTeamId?: string): ReplayEvaluation {
       const p = getPitcher(pitcherId);
       p.pitches++;
       if (segMistake) p.mistakes++;
+      if (segOverpowered) p.overpowered++;
       const ptype = segPitchType ?? 'unknown';
       pitcherTypeStat = p._types.get(ptype);
       if (!pitcherTypeStat) {
-        pitcherTypeStat = { type: ptype, label: PITCH_LABELS[ptype] ?? ptype, count: 0, swings: 0, whiffs: 0, inPlay: 0 };
+        pitcherTypeStat = { type: ptype, label: PITCH_LABELS[ptype] ?? ptype, count: 0, swings: 0, whiffs: 0, inPlay: 0, overpowered: 0, veloSum: 0, veloCount: 0 };
         p._types.set(ptype, pitcherTypeStat);
       }
       pitcherTypeStat.count++;
+      if (segOverpowered) pitcherTypeStat.overpowered++;
+      if (segVelocity != null) { pitcherTypeStat.veloSum += segVelocity; pitcherTypeStat.veloCount++; }
     }
     if (sawPitch && batterSide) disc[batterSide].pitchesSeen++;
 
@@ -674,6 +687,34 @@ export interface PlayerGameMetrics {
   dpOpp: number;
   // Count of nearest-fielder range charges (see unreachedDists below).
   unreached: number;
+  // ── 2026-07-09 data-audit additions (all counting stats; see docs/data-audit) ──
+  // Close-play margins from runner.out/safe arrival times (seconds), stored as
+  // runnerArrival − throwArrival ("beat"): POSITIVE = the throw arrived first.
+  // (Verified corpus-wide: outs are 100% throw-first under this convention.)
+  // throwMargin: credited to the THROWER on our defensive outs (assistedBy, else
+  // the putout fielder). runMargin: our RUNNERS on outs + steal-safes —
+  // NEGATIVE = the runner beat the throw (faster is better); return_pitch /
+  // advance safes are excluded (not races).
+  throwMarginSum: number;
+  throwMarginCount: number;
+  runMarginSum: number;
+  runMarginCount: number;
+  // Exchange quality on our throws: releaseBand categorial + bobbles.
+  releaseGreat: number;
+  releaseSlow: number;
+  releaseBanded: number; // throws that carried a releaseBand at all
+  bobbles: number;
+  // Baserunning: steal-jump quality + leadoff size for OUR runners.
+  jumpGreat: number;
+  jumpSlow: number;
+  jumpTotal: number;
+  leadoffSum: number; // Σ leadoffDistancePercent
+  leadoffCount: number;
+  // Pitch-velocity exposure as a BATTER (mph-like sim units; Extinguisher scales
+  // with mph over 85): Σv, count, and Σmax(0, v−85) over pitches seen.
+  veloFacedSum: number;
+  veloFacedCount: number;
+  veloOver85Sum: number;
   // Query-time transients (never stored): range-aware expected/actual outs from
   // the combined engaged+unreached fit — see applyRangeCurve in the metrics route.
   rangeXOuts?: number;
@@ -706,7 +747,10 @@ export interface PlayerGameMetrics {
   // = for batting talents that fire pre-swing, swings on which the talent fired
   // and how many made contact (so we can show "fired N×, contact X%"). Aggregated
   // for the cross-game talent overview.
-  talentActs?: Record<string, { acts: number; effects: number; stacked: number; maxTier: number; firedSwings: number; firedContact: number }>;
+  talentActs?: Record<string, { acts: number; effects: number; stacked: number; maxTier: number; firedSwings: number; firedContact: number; activeSwings?: number; activeContact?: number }>;
+  // Pitch-zone mix faced as a batter: cell "1"–"9" (3×3 grid; numbering scheme
+  // not yet decoded — treat as opaque ids) and "10" = out of the zone.
+  zonesSeen?: Record<string, number>;
 }
 
 // Batted-ball spray geometry. `horizontalAngle` is a bearing where ≈ −90° is
@@ -724,6 +768,17 @@ function sprayPoint(horizontalAngle: unknown, hitDepth: unknown): { x: number; y
   const theta = ((horizontalAngle + 90) * Math.PI) / 180; // 0 = straight CF
   if (Math.abs(theta) > (55 * Math.PI) / 180) return null; // foul territory guard
   return { x: Math.round(r * Math.sin(theta)), y: Math.round(-r * Math.cos(theta)) };
+}
+
+// Precise landing point from ball.flight (horizontalAngle + landingDistance) —
+// same bearing convention and coordinate scale as sprayPoint (verified against
+// the categorical radii: median ratio 0.91 over 842 balls). Preferred over
+// sprayPoint when available; falls back for old-format replays.
+function flightPoint(horizontalAngle: unknown, landingDistance: unknown): { x: number; y: number } | null {
+  if (typeof horizontalAngle !== 'number' || typeof landingDistance !== 'number' || landingDistance <= 0) return null;
+  const theta = ((horizontalAngle + 90) * Math.PI) / 180;
+  if (Math.abs(theta) > (55 * Math.PI) / 180) return null;
+  return { x: Math.round(landingDistance * Math.sin(theta)), y: Math.round(-landingDistance * Math.cos(theta)) };
 }
 
 // Empirical out-conversion probability given how far a fielder had to travel to
@@ -841,6 +896,23 @@ export interface AggregatedPlayer {
   // visible set (same MLE calibration). null until a re-sync backfills
   // unreachedDists. `unreached` = balls charged (fell for hits, nobody engaged).
   rangePae: number | null; rangePaePerGame: number | null; unreached: number;
+  // ── 2026-07-09 data-audit additions ──
+  // Close-play margins (seconds, runnerArrival − throwArrival = "beat"):
+  // throwMargin = avg beat on out-recording throws (positive; larger =
+  // comfortable outs, near 0 = bang-bang — continuous arm signal); runMargin =
+  // avg beat against our RUNNERS on races (negative = runner beat the throw —
+  // speed signal).
+  throwMargin: number | null; throwMarginN: number;
+  runMargin: number | null; runMarginN: number;
+  // Exchange quality: bobbled throws + share of banded throws released 'great'.
+  bobbles: number; releaseGreatRate: number | null;
+  // Baserunning: steal-jump quality counts + avg leadoff size (%).
+  jumpGreat: number; jumpSlow: number; jumpTotal: number; leadoffAvg: number | null;
+  // Pitch-velocity exposure as a batter (Extinguisher valuation): avg velo
+  // faced + avg mph-over-85 per pitch seen.
+  veloFacedAvg: number | null; over85PerPitch: number | null;
+  // Pitch-zone mix faced (cells "1"–"9", "10" = out of zone; numbering opaque).
+  zonesSeen: Record<string, number> | null;
   // OF extra-base suppression (bases held below expected) — the value axis PAE
   // can't see; total, per-game, and the opportunity count it's based on.
   basesSaved: number | null; basesSavedPerGame: number | null; basesSavedOpps: number;
@@ -852,7 +924,7 @@ export interface AggregatedPlayer {
   // acts = total triggers; effects = effect applications (effects/acts > 1 ⇒
   // multiple effects per trigger); maxTier = talent LEVEL (not a stack); perGame
   // = acts/games. Empty until games are (re-)synced with talent data.
-  talents: { name: string; acts: number; effects: number; stacked: number; maxTier: number; firedSwings: number; firedContact: number; perGame: number }[];
+  talents: { name: string; acts: number; effects: number; stacked: number; maxTier: number; firedSwings: number; firedContact: number; activeSwings: number; activeContact: number; perGame: number }[];
   // per-position fielding splits (best-position breakdown), most-played first
   byPosition: PlayerPositionSplit[];
 }
@@ -888,6 +960,10 @@ function emptyMetrics(playerId: string, name: string, position: number | null): 
     expectedOuts: 0, engagedOuts: 0, leverageSum: 0, basesSavedSum: 0, basesSavedOpps: 0, stealAttempts: 0, caughtStealing: 0,
     dpInvolved: 0, dpStarted: 0, dpTurned: 0, dpFinished: 0, dpOpp: 0,
     unreached: 0,
+    throwMarginSum: 0, throwMarginCount: 0, runMarginSum: 0, runMarginCount: 0,
+    releaseGreat: 0, releaseSlow: 0, releaseBanded: 0, bobbles: 0,
+    jumpGreat: 0, jumpSlow: 0, jumpTotal: 0, leadoffSum: 0, leadoffCount: 0,
+    veloFacedSum: 0, veloFacedCount: 0, veloOver85Sum: 0,
     engageDists: [],
   };
 }
@@ -959,6 +1035,15 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
   };
   // A batter-talent fired on a swing — record the swing + whether it made contact,
   // so we can show "fired N×, contact X%" (the observable effect of contact talents).
+  // A talent was ACTIVE (per segment.activeEffects) on a swing — the buff-state
+  // view: unlike noteFired it also counts carried-over effects still running,
+  // so "contact% while buffed" is measured against the full active window.
+  const noteActive = (ownerId: string, talentId: string, madeContact: boolean) => {
+    const e = talentEntry(ownerId, talentId);
+    if (!e) return;
+    e.activeSwings = (e.activeSwings ?? 0) + 1;
+    if (madeContact) e.activeContact = (e.activeContact ?? 0) + 1;
+  };
   const noteFired = (ownerId: string, talentId: string, madeContact: boolean) => {
     const e = talentEntry(ownerId, talentId);
     if (!e) return;
@@ -980,6 +1065,10 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
   }
   const oppSpray: { x: number; y: number; o: boolean }[] = [];
   let lastOppContact: { ha: unknown; depth: unknown } | undefined;
+  // Precise landing geometry from ball.flight (same coordinate scale as player
+  // coords — verified median ratio 0.91 vs the categorical depth radii). Used
+  // in preference to the categorical sprayPoint when present.
+  let lastOppFlight: { ha: unknown; dist: unknown } | undefined;
 
   const rows = new Map<string, PlayerGameMetrics>();
   const row = (id: string) => {
@@ -1054,10 +1143,12 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
       abOuts = typeof gs0?.outs === 'number' ? gs0.outs : 0;
       lastContact = undefined;
       lastOppContact = undefined;
+      lastOppFlight = undefined;
       throwBuf = [];
     }
 
     let sawPitch = false;
+    let segPitch: { velocity?: unknown; pitchZone?: unknown } | undefined;
     // A foul-ball pitch where the corner fielder merely retrieves a dead ball
     // is NOT a fielding chance. We detect the foul context per pitch-segment and
     // skip the chance accounting unless an out is actually recorded (a caught
@@ -1065,17 +1156,44 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
     let segIsFoul = false;
     let segHasOut = false;
     for (const ev of seg.events ?? []) {
-      if (ev.type === 'pitch.thrown') sawPitch = true;
+      if (ev.type === 'pitch.thrown') { sawPitch = true; segPitch = ev.payload; }
       else if (ev.type === 'batter.foul') segIsFoul = true;
       else if (ev.type === 'pitch.result' && ev.payload?.outcome === 'foul') segIsFoul = true;
       else if (ev.type === 'runner.out') segHasOut = true;
     }
     const skipFoulFetch = segIsFoul && !segHasOut;
-    if (sawPitch && batterId && batterSide === ourSide) row(batterId).pitchesSeen++;
+    if (sawPitch && batterId && batterSide === ourSide) {
+      const r = row(batterId);
+      r.pitchesSeen++;
+      // Velocity exposure (Extinguisher scales with mph over 85) + zone mix.
+      const v = segPitch?.velocity;
+      if (typeof v === 'number') {
+        r.veloFacedSum += v;
+        r.veloFacedCount++;
+        if (v > 85) r.veloOver85Sum += v - 85;
+      }
+      const z = segPitch?.pitchZone;
+      if (z != null) {
+        const zs = (r.zonesSeen ??= {});
+        zs[String(z)] = (zs[String(z)] ?? 0) + 1;
+      }
+    }
 
     // Batter talents that fired this pitch (pre-swing) — credited with the swing
     // outcome below, so contact talents show "fired N×, contact X%".
     const segFired: string[] = [];
+    // Talents ACTIVE on the batter this segment (from segment.activeEffects —
+    // includes carried-over durations the fired-this-segment view misses).
+    const segActiveTalents: string[] = [];
+    if (batterId && Array.isArray(seg.activeEffects)) {
+      const seen = new Set<string>();
+      for (const ae of seg.activeEffects) {
+        if (ae?.targetEntityId === batterId && ae?.source === 'talent' && ae?.talentId && !seen.has(ae.talentId)) {
+          seen.add(ae.talentId);
+          segActiveTalents.push(ae.talentId);
+        }
+      }
+    }
     // Post-patch effect.activated dedup (see evaluateReplay).
     const segActivated = new Set<string>();
     for (const ev of seg.events ?? []) {
@@ -1118,6 +1236,8 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
             if (!pl.madeContact) r.whiffs++;
             // Credit each talent that fired pre-swing with this swing's outcome.
             for (const tid of segFired) noteFired(batterId, tid, !!pl.madeContact);
+            // And each talent ACTIVE during the swing (buff-state view).
+            for (const tid of segActiveTalents) noteActive(batterId, tid, !!pl.madeContact);
           }
           break;
         }
@@ -1133,6 +1253,13 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
           // outcome lands (skip fouls; those aren't balls in play).
           if (batterSide && batterSide !== ourSide && !/^Foul/.test(pl.hitDirection ?? '')) {
             lastOppContact = { ha: pl.horizontalAngle, depth: pl.hitDepth };
+            lastOppFlight = undefined; // reset until this ball's flight arrives
+          }
+          break;
+        }
+        case 'ball.flight': {
+          if (batterSide && batterSide !== ourSide) {
+            lastOppFlight = { ha: pl.horizontalAngle, dist: pl.landingDistance };
           }
           break;
         }
@@ -1163,8 +1290,11 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
             }
           }
           // Opponent batted ball → record its spray point + whether we got the out.
-          if (batterSide && batterSide !== ourSide && lastOppContact) {
-            const pt = sprayPoint(lastOppContact.ha, lastOppContact.depth);
+          // Prefer the precise ball.flight landing (same coordinate scale,
+          // verified) over the categorical-depth approximation.
+          if (batterSide && batterSide !== ourSide && (lastOppFlight || lastOppContact)) {
+            const pt = (lastOppFlight ? flightPoint(lastOppFlight.ha, lastOppFlight.dist) : null)
+              ?? (lastOppContact ? sprayPoint(lastOppContact.ha, lastOppContact.depth) : null);
             if (pt) {
               oppSpray.push({ x: pt.x, y: pt.y, o: !HIT_RESULTS.has(pl.result ?? '') });
               // Nearest-fielder range charge: the ball fell for a hit and NO
@@ -1202,6 +1332,7 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
           }
           lastContact = undefined;
           lastOppContact = undefined;
+          lastOppFlight = undefined;
           break;
         }
         case 'fielder.catch': {
@@ -1264,6 +1395,13 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
               r.releaseSum += pl.releaseTime;
               r.releaseCount++;
             }
+            // Exchange quality: categorical release band + bobbles (2026-07-09).
+            if (typeof pl.releaseBand === 'string') {
+              r.releaseBanded++;
+              if (pl.releaseBand === 'great') r.releaseGreat++;
+              else if (pl.releaseBand === 'slow') r.releaseSlow++;
+            }
+            if (pl.bobbled === true) r.bobbles++;
             throwBuf.push({ throwerId: pl.throwerId, targetOut: pl.targetOut ?? null, base });
           } else if (base !== MOUND_BASE && pl.throwerId) {
             // still buffer (for assist linking even if thrower not ours — harmless)
@@ -1275,11 +1413,56 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
         case 'runner.stolen_base': {
           // An opponent steal attempt (we're fielding → our catcher defends).
           if (pl.runnerId && batterSide && batterSide !== ourSide) stealRunners.add(pl.runnerId);
+          // OUR runner attempting a steal → jump quality (2026-07-09).
+          if (pl.runnerId && isOurs(pl.runnerId)) {
+            const r = row(pl.runnerId);
+            r.jumpTotal++;
+            if (pl.jumpQuality === 'great') r.jumpGreat++;
+            else if (pl.jumpQuality === 'slow') r.jumpSlow++;
+          }
+          break;
+        }
+        case 'runner.leadoff': {
+          // Leadoff size per pitch for OUR runners (2026-07-09).
+          if (pl.runnerId && isOurs(pl.runnerId) && typeof pl.leadoffDistancePercent === 'number') {
+            const r = row(pl.runnerId);
+            r.leadoffSum += pl.leadoffDistancePercent;
+            r.leadoffCount++;
+          }
+          break;
+        }
+        case 'runner.safe': {
+          // Close-play margin for OUR runner on a genuine race (steals only —
+          // return_pitch/advance safes aren't races): runnerArrival − throwArrival,
+          // negative = beat the throw. Out-side margins are in runner.out below.
+          if (pl.reason === 'steal' && pl.runnerId && isOurs(pl.runnerId) && typeof pl.throwArrivalTime === 'number' && typeof pl.runnerArrivalTime === 'number') {
+            const r = row(pl.runnerId);
+            r.runMarginSum += pl.runnerArrivalTime - pl.throwArrivalTime;
+            r.runMarginCount++;
+          }
           break;
         }
         case 'runner.out': {
           const fielderId = pl.fielderId;
           if (pl.runnerId) outRunners.add(pl.runnerId);
+          // Close-play margins from arrival times (2026-07-09; absent on
+          // strikeouts). Stored as runnerArrival − throwArrival ("beat", positive
+          // = throw first — always the case on outs). Defensive credit goes to
+          // the THROWER; runner credit measures pure speed (lower = faster).
+          if (pl.outType !== 'strikeout' && typeof pl.throwArrivalTime === 'number' && typeof pl.runnerArrivalTime === 'number') {
+            const beat = pl.runnerArrivalTime - pl.throwArrivalTime;
+            if (pl.runnerId && isOurs(pl.runnerId)) {
+              const r = row(pl.runnerId);
+              r.runMarginSum += beat;
+              r.runMarginCount++;
+            }
+            if (isOurs(fielderId)) {
+              const thrower = typeof pl.assistedBy === 'string' && isOurs(pl.assistedBy) && pl.assistedBy !== fielderId ? pl.assistedBy : fielderId;
+              const t = row(thrower);
+              t.throwMarginSum += beat;
+              t.throwMarginCount++;
+            }
+          }
           if (isOurs(fielderId)) {
             const r = row(fielderId);
             r.putouts++;
