@@ -145,6 +145,31 @@ const TALENTS: TalentDef[] = [
   // live in talentIndex.json.
   { id: 'extinguisher', name: 'Extinguisher', description: 'The harder they throw, the better this batter sees it — contact grows with every mph over 85.', category: 'hitting' },
   { id: 'master_of_none', name: 'Master of None', description: 'A deep arsenal sharpens every pitch — velocity and movement grow with each unique pitch the pitcher has unlocked.', category: 'pitching' },
+  // Pitch-counter (Tracker/Crusher) batter talents — from the /talents/pitch-counters
+  // index sub-page (2026-07-10). Per-pitch versions are stronger than category ones.
+  { id: 'ctr:cat:breaking:contact', name: 'Breaking Ball Tracker', description: 'Batter: +5/7/8/10% Contact on breaking balls.', category: 'hitting' },
+  { id: 'ctr:cat:fastball:contact', name: 'Fastball Tracker', description: 'Batter: +5/7/8/10% Contact on fastballs.', category: 'hitting' },
+  { id: 'ctr:cat:breaking:power', name: 'Breaking Ball Crusher', description: 'Batter: +4/6/8/10% Power on breaking balls.', category: 'hitting' },
+  { id: 'ctr:cat:fastball:power', name: 'Fastball Crusher', description: 'Batter: +4/6/8/10% Power on fastballs.', category: 'hitting' },
+  { id: 'ctr:cat:offSpeed:power', name: 'Off Speed Crusher', description: 'Batter: +4/6/8/10% Power on off-speed pitches.', category: 'hitting' },
+  { id: 'ctr:pitch:changeup:contact', name: 'Changeup Tracker', description: 'Batter: +7/10/13/16% Contact on Changeups.', category: 'hitting' },
+  { id: 'ctr:pitch:curveball:contact', name: 'Curveball Tracker', description: 'Batter: +7/10/13/16% Contact on Curveballs.', category: 'hitting' },
+  { id: 'ctr:pitch:cutter:contact', name: 'Cutter Tracker', description: 'Batter: +7/10/13/16% Contact on Cutters.', category: 'hitting' },
+  { id: 'ctr:pitch:fourSeamFastball:contact', name: 'Four-Seam Tracker', description: 'Batter: +7/10/13/16% Contact on Four-Seam Fastballs.', category: 'hitting' },
+  { id: 'ctr:pitch:knuckleball:contact', name: 'Knuckleball Tracker', description: 'Batter: +7/10/13/16% Contact on Knuckleballs.', category: 'hitting' },
+  { id: 'ctr:pitch:sinker:contact', name: 'Sinker Tracker', description: 'Batter: +7/10/13/16% Contact on Sinkers.', category: 'hitting' },
+  { id: 'ctr:pitch:slider:contact', name: 'Slider Tracker', description: 'Batter: +7/10/13/16% Contact on Sliders.', category: 'hitting' },
+  { id: 'ctr:pitch:splitter:contact', name: 'Splitter Tracker', description: 'Batter: +7/10/13/16% Contact on Splitters.', category: 'hitting' },
+  { id: 'ctr:pitch:twoSeamFastball:contact', name: 'Two-Seam Tracker', description: 'Batter: +7/10/13/16% Contact on Two-Seam Fastballs.', category: 'hitting' },
+  { id: 'ctr:pitch:changeup:power', name: 'Changeup Crusher', description: 'Batter: +8/12/16/20% Power on Changeups.', category: 'hitting' },
+  { id: 'ctr:pitch:curveball:power', name: 'Curveball Crusher', description: 'Batter: +8/12/16/20% Power on Curveballs.', category: 'hitting' },
+  { id: 'ctr:pitch:cutter:power', name: 'Cutter Crusher', description: 'Batter: +8/12/16/20% Power on Cutters.', category: 'hitting' },
+  { id: 'ctr:pitch:fourSeamFastball:power', name: 'Four-Seam Crusher', description: 'Batter: +8/12/16/20% Power on Four-Seam Fastballs.', category: 'hitting' },
+  { id: 'ctr:pitch:knuckleball:power', name: 'Knuckleball Crusher', description: 'Batter: +8/12/16/20% Power on Knuckleballs.', category: 'hitting' },
+  { id: 'ctr:pitch:sinker:power', name: 'Sinker Crusher', description: 'Batter: +8/12/16/20% Power on Sinkers.', category: 'hitting' },
+  { id: 'ctr:pitch:slider:power', name: 'Slider Crusher', description: 'Batter: +8/12/16/20% Power on Sliders.', category: 'hitting' },
+  { id: 'ctr:pitch:splitter:power', name: 'Splitter Crusher', description: 'Batter: +8/12/16/20% Power on Splitters.', category: 'hitting' },
+  { id: 'ctr:pitch:twoSeamFastball:power', name: 'Two-Seam Crusher', description: 'Batter: +8/12/16/20% Power on Two-Seam Fastballs.', category: 'hitting' },
 ];
 
 export const ALL_TALENTS = TALENTS;
