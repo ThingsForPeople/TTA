@@ -5,6 +5,7 @@ import { CollapsiblePanel } from './CollapsiblePanel';
 import type { AggregatedPlayer, PositionImportance, PlayerPositionSplit } from '../lib/parseReplay';
 import { DEFAULT_POSITION_IMPORTANCE, DEFAULT_STAT_WEIGHTS, type StatWeights } from '../lib/rosterOptimizer';
 import { maxAssignment } from '../lib/assign';
+import { OUT_OF_ZONE_CELL, zoneCellsForDirection } from '../lib/talentEffects';
 
 interface Props {
   teamUuid: string;
@@ -73,9 +74,10 @@ function PositionComparison({ players }: { players: AggregatedPlayer[] }) {
 }
 
 function FielderCompare({ rows }: { rows: { name: string; s: PlayerPositionSplit }[] }) {
-  const sorted = rows.slice().sort((a, b) => b.s.paePerGame - a.s.paePerGame);
+  const val = (s: PlayerPositionSplit) => s.rangePaePerGame ?? s.paePerGame;
+  const sorted = rows.slice().sort((a, b) => val(b.s) - val(a.s));
   const rankable = sorted.filter((r) => r.s.games >= MIN_SPLIT_GAMES && r.s.chances >= MIN_SPLIT_CHANCES);
-  const best = rankable.length ? Math.max(...rankable.map((r) => r.s.paePerGame)) : null;
+  const best = rankable.length ? Math.max(...rankable.map((r) => val(r.s))) : null;
   return (
     <div className="overflow-x-auto">
       <table className="w-full border-collapse text-xs">
@@ -84,7 +86,7 @@ function FielderCompare({ rows }: { rows: { name: string; s: PlayerPositionSplit
             <th className="px-2 py-1 text-left">Player</th>
             <th className="px-1.5 py-1 text-right">G</th>
             <th className="px-1.5 py-1 text-right">Ch</th>
-            <th className="px-1.5 py-1 text-right" title="Plays above expected per game (position-relative)">PAE/g</th>
+            <th className="px-1.5 py-1 text-right" title="Range-aware plays above expected per game (position-relative; falls back to engaged-only PAE until a re-sync populates rPAE)">rPAE/g</th>
             <th className="px-1.5 py-1 text-right">Fld%</th>
             <th className="px-1.5 py-1 text-right">Range</th>
             <th className="px-1.5 py-1 text-right">Arm</th>
@@ -93,7 +95,7 @@ function FielderCompare({ rows }: { rows: { name: string; s: PlayerPositionSplit
         <tbody>
           {sorted.map(({ name, s }) => {
             const low = s.games < MIN_SPLIT_GAMES || s.chances < MIN_SPLIT_CHANCES;
-            const isBest = best != null && s.paePerGame === best && !low;
+            const isBest = best != null && val(s) === best && !low;
             return (
               <tr key={name} className={'border-b border-slate-800/60 last:border-0 ' + (isBest ? 'text-emerald-300' : low ? 'text-slate-500' : 'text-slate-300')}>
                 <td className="px-2 py-1 whitespace-nowrap">
@@ -101,7 +103,7 @@ function FielderCompare({ rows }: { rows: { name: string; s: PlayerPositionSplit
                 </td>
                 <td className="px-1.5 py-1 text-right font-mono">{s.games}</td>
                 <td className="px-1.5 py-1 text-right font-mono">{s.chances}</td>
-                <td className="px-1.5 py-1 text-right font-mono">{signed1(s.paePerGame)}</td>
+                <td className="px-1.5 py-1 text-right font-mono">{signed1(val(s))}</td>
                 <td className="px-1.5 py-1 text-right font-mono">{rate3(s.fieldPct)}</td>
                 <td className="px-1.5 py-1 text-right font-mono">{num1(s.rangeAvg)}</td>
                 <td className="px-1.5 py-1 text-right font-mono">{num1(s.armAvg)}</td>
@@ -203,7 +205,9 @@ function computeAlignment(players: AggregatedPlayer[], posImp: PositionImportanc
       const above = s.caughtStealing - meanCs * s.stealAttempts;
       return s.games > 0 ? above / s.games : 0;
     }
-    return s.paePerGame;
+    // Range-aware PAE first: post-patch, engaged-only PAE is nearly saturated,
+    // so the skill separation lives in unreached balls (rPAE).
+    return s.rangePaePerGame ?? s.paePerGame;
   };
 
   // weight[positionRow][candidateCol] = importance × per-game value, null if the
@@ -245,7 +249,7 @@ function BestAlignment({ players, posImp }: { players: AggregatedPlayer[]; posIm
               <th className="px-2 py-1 text-left">Player</th>
               <th className="px-1.5 py-1 text-right" title="Derived position importance (higher = defense matters more here)">Imp</th>
               <th className="px-1.5 py-1 text-right">G</th>
-              <th className="px-1.5 py-1 text-right" title="Plays above expected per game at this spot (context-corrected), or steal-prevention for C">Value</th>
+              <th className="px-1.5 py-1 text-right" title="Range-aware PAE per game at this spot (falls back to engaged-only PAE pre-re-sync), or steal-prevention for C">Value</th>
             </tr>
           </thead>
           <tbody>
@@ -263,7 +267,7 @@ function BestAlignment({ players, posImp }: { players: AggregatedPlayer[]; posIm
                     ? '·'
                     : s.posNum === 2
                       ? (s.csRate == null ? '·' : Math.round(s.csRate * 100) + '% CS')
-                      : signed1(s.split.paePerGame)}
+                      : signed1(s.split.rangePaePerGame ?? s.split.paePerGame)}
                 </td>
               </tr>
             ))}
@@ -512,8 +516,25 @@ function HeatMaps({ heatBins, sprayBins }: { heatBins: HeatBin[]; sprayBins: Spr
 // e.g. "waste" for one player, or sort by Fires/g to see what's most active.
 // Shows how OFTEN each talent triggers; the replay doesn't expose in-game stack
 // depth (tier = talent level), so there's no "stacking" column.
-type TalentRow = { player: string; playerId: string; games: number; name: string; acts: number; perPA: number | null; maxTier: number; firedSwings: number; contactPct: number | null; activeSwings: number; activeContactPct: number | null };
-type TalentSort = 'perPA' | 'acts' | 'maxTier' | 'name' | 'player' | 'contactPct' | 'activeContactPct';
+type TalentRow = { player: string; playerId: string; games: number; name: string; acts: number; perPA: number | null; maxTier: number; firedSwings: number; contactPct: number | null; activeSwings: number; activeContactPct: number | null; coverage: number | null };
+
+// Realized zone-talent coverage: share of IN-ZONE pitches this batter actually
+// saw that land in the talent's 3 cells (cell decode in talentEffects). Answers
+// "how often does his Low Driver actually apply?" against his real pitch mix.
+function zoneCoverage(name: string, p: AggregatedPlayer): number | null {
+  const m = /^(High|Low|Inside|Outside)\s/.exec(name);
+  if (!m || !p.zonesSeen) return null;
+  const cells = zoneCellsForDirection(m[1], p.bats);
+  if (!cells) return null;
+  let inZone = 0, covered = 0;
+  for (const [cell, n] of Object.entries(p.zonesSeen)) {
+    if (cell === OUT_OF_ZONE_CELL) continue;
+    inZone += n ?? 0;
+    if (cells.includes(cell)) covered += n ?? 0;
+  }
+  return inZone > 0 ? covered / inZone : null;
+}
+type TalentSort = 'perPA' | 'acts' | 'maxTier' | 'name' | 'player' | 'contactPct' | 'activeContactPct' | 'coverage';
 
 function TalentView({ players }: { players: AggregatedPlayer[] }) {
   const [playerId, setPlayerId] = useState('all');
@@ -533,7 +554,7 @@ function TalentView({ players }: { players: AggregatedPlayer[] }) {
   const needle = q.trim().toLowerCase();
   let rows: TalentRow[] = withTalents
     .filter((p) => playerId === 'all' || p.playerId === playerId)
-    .flatMap((p) => p.talents.map((t) => ({ player: p.name, playerId: p.playerId, games: p.games, name: t.name, acts: t.acts, perPA: p.pa > 0 ? t.acts / p.pa : null, maxTier: t.maxTier, firedSwings: t.firedSwings, contactPct: t.firedSwings > 0 ? t.firedContact / t.firedSwings : null, activeSwings: t.activeSwings ?? 0, activeContactPct: (t.activeSwings ?? 0) > 0 ? (t.activeContact ?? 0) / t.activeSwings : null })));
+    .flatMap((p) => p.talents.map((t) => ({ player: p.name, playerId: p.playerId, games: p.games, name: t.name, acts: t.acts, perPA: p.pa > 0 ? t.acts / p.pa : null, maxTier: t.maxTier, firedSwings: t.firedSwings, contactPct: t.firedSwings > 0 ? t.firedContact / t.firedSwings : null, activeSwings: t.activeSwings ?? 0, activeContactPct: (t.activeSwings ?? 0) > 0 ? (t.activeContact ?? 0) / t.activeSwings : null, coverage: zoneCoverage(t.name, p) })));
   if (needle) rows = rows.filter((r) => r.name.toLowerCase().includes(needle));
   rows.sort((a, b) => {
     const s = dir === 'asc' ? 1 : -1;
@@ -579,6 +600,7 @@ function TalentView({ players }: { players: AggregatedPlayer[] }) {
               <Th k="acts" label="Total" title="Total triggers across the games in view" num />
               <Th k="contactPct" label="Contact%" title="For batting talents that fire pre-swing: contact rate on the swings where this talent fired. Observational (the talent fires in specific situations), not a controlled A/B — but it's the direct readout of a contact talent doing its job." num />
               <Th k="activeContactPct" label="Buffed%" title="Contact rate on swings taken while this talent's effect was ACTIVE (from the replay's per-segment active-effects state — includes carried-over durations the fired-this-pitch view misses). Compare to the player's overall contact rate." num />
+              <Th k="coverage" label="Cover%" title="Zone talents only: share of IN-ZONE pitches this batter actually sees that land in the talent's three cells (decoded cell map × his measured pitch mix). Low coverage = the talent rarely applies to him." num />
               <Th k="maxTier" label="Lvl" title="Talent level (from the roster). NOT an in-game stack — the replay doesn't expose per-game stack depth." num />
             </tr>
           </thead>
@@ -591,6 +613,7 @@ function TalentView({ players }: { players: AggregatedPlayer[] }) {
                 <td className="px-1.5 py-1 text-right font-mono text-slate-500">{r.acts}</td>
                 <td className="px-1.5 py-1 text-right font-mono" title={r.contactPct != null ? `contact rate on ${r.firedSwings} swings where it fired` : ''}>{r.contactPct != null ? Math.round(r.contactPct * 100) + '%' : '·'}</td>
                 <td className="px-1.5 py-1 text-right font-mono" title={r.activeContactPct != null ? `contact rate on ${r.activeSwings} swings with the effect active` : ''}>{r.activeContactPct != null ? Math.round(r.activeContactPct * 100) + '%' : '·'}</td>
+                <td className="px-1.5 py-1 text-right font-mono">{r.coverage != null ? Math.round(r.coverage * 100) + '%' : '·'}</td>
                 <td className="px-1.5 py-1 text-right font-mono text-slate-500">{r.maxTier > 0 ? r.maxTier : '·'}</td>
               </tr>
             ))}

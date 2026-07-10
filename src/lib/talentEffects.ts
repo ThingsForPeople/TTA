@@ -137,6 +137,30 @@ export const ENGINE_STAT_GLOSSARY: Record<EngineStat, string> = {
  * magnitude (which is unknown). Used to differentiate zone talents in the
  * batting-order engine instead of treating them all identically.
  */
+// ── Pitch-zone cell decode (2026-07-09, from replay corpus) ─────────────
+// `pitchZone` cells are ROW-MAJOR over the 3×3 grid: 1-2-3 = HIGH row,
+// 4-5-6 = MID, 7-8-9 = LOW; columns 1/4/7 = LEFT and 3/6/9 = RIGHT from the
+// catcher's view; 10 = out of the zone. Decoded by joining hz:* zone-talent
+// effect.activated events to their segment's pitchZone (a direction's talents
+// only fire in its 3 cells; verified for both hands — inside(R)=1/4/7 ==
+// outside(L), mirrored, matching the documented handedness flip).
+export const ZONE_CELLS: Record<'high' | 'mid' | 'low' | 'left' | 'center' | 'right', string[]> = {
+  high: ['1', '2', '3'], mid: ['4', '5', '6'], low: ['7', '8', '9'],
+  left: ['1', '4', '7'], center: ['2', '5', '8'], right: ['3', '6', '9'],
+};
+export const OUT_OF_ZONE_CELL = '10';
+
+/** Cells covered by a directional zone-talent word, resolving inside/outside
+ *  by batting hand (R: inside = left column from the catcher's view). */
+export function zoneCellsForDirection(direction: string, bats: string | null | undefined): string[] | null {
+  const d = direction.toLowerCase();
+  if (d === 'high') return ZONE_CELLS.high;
+  if (d === 'low') return ZONE_CELLS.low;
+  if (d === 'inside') return bats === 'L' ? ZONE_CELLS.right : bats === 'R' ? ZONE_CELLS.left : null;
+  if (d === 'outside') return bats === 'L' ? ZONE_CELLS.left : bats === 'R' ? ZONE_CELLS.right : null;
+  return null;
+}
+
 export type ZoneHitEffect = 'Dialed' | 'Driver' | 'Chopper' | 'Popper' | 'Hacker';
 export const ZONE_HIT_EFFECT: Record<ZoneHitEffect, { engineStat: EngineStat; rank: number; note: string }> = {
   Driver: { engineStat: "line_drive_chance", rank: 5, note: "line drives -- the highest-value batted ball (replay-confirmed: +~0.3 line-drive share, +1-3 EV when active)" },

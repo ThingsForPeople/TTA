@@ -615,6 +615,7 @@ export interface PlayerGameMetrics {
   playerId: string;
   name: string;
   position: number | null; // 1-9 standard scorekeeping number from the replay
+  bats?: string; // batting hand from the replay roster (resolves inside/outside zone cells)
   // batting
   pa: number;
   ab: number;
@@ -715,6 +716,11 @@ export interface PlayerGameMetrics {
   veloFacedSum: number;
   veloFacedCount: number;
   veloOver85Sum: number;
+  // Platoon splits vs the opposing pitcher's throwing hand (from the replay
+  // roster's `throws`). Enough sims (~100) give real L/R splits per batter —
+  // the input handedness talents and start/sit calls want.
+  paVsL: number; abVsL: number; hitsVsL: number; kVsL: number;
+  paVsR: number; abVsR: number; hitsVsR: number; kVsR: number;
   // Query-time transients (never stored): range-aware expected/actual outs from
   // the combined engaged+unreached fit — see applyRangeCurve in the metrics route.
   rangeXOuts?: number;
@@ -913,6 +919,12 @@ export interface AggregatedPlayer {
   veloFacedAvg: number | null; over85PerPitch: number | null;
   // Pitch-zone mix faced (cells "1"–"9", "10" = out of zone; numbering opaque).
   zonesSeen: Record<string, number> | null;
+  // Batting hand (from the replay roster) — resolves inside/outside zone cells.
+  bats: string | null;
+  // Platoon splits vs the opposing pitcher's hand (from re-sims).
+  paVsL: number; paVsR: number;
+  avgVsL: number | null; avgVsR: number | null;
+  kRateVsL: number | null; kRateVsR: number | null;
   // OF extra-base suppression (bases held below expected) — the value axis PAE
   // can't see; total, per-game, and the opportunity count it's based on.
   basesSaved: number | null; basesSavedPerGame: number | null; basesSavedOpps: number;
@@ -964,6 +976,7 @@ function emptyMetrics(playerId: string, name: string, position: number | null): 
     releaseGreat: 0, releaseSlow: 0, releaseBanded: 0, bobbles: 0,
     jumpGreat: 0, jumpSlow: 0, jumpTotal: 0, leadoffSum: 0, leadoffCount: 0,
     veloFacedSum: 0, veloFacedCount: 0, veloOver85Sum: 0,
+    paVsL: 0, abVsL: 0, hitsVsL: 0, kVsL: 0, paVsR: 0, abVsR: 0, hitsVsR: 0, kVsR: 0,
     engageDists: [],
   };
 }
@@ -1009,13 +1022,13 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
   const home = game.home ?? {};
   const away = game.away ?? {};
 
-  const playerById = new Map<string, { name: string; side: 'home' | 'away'; position: number | null; coord?: { x: number; y: number } }>();
+  const playerById = new Map<string, { name: string; side: 'home' | 'away'; position: number | null; coord?: { x: number; y: number }; throws?: string; bats?: string }>();
   const talentNames = new Map<string, string>(); // talentId -> displayName
   for (const side of ['home', 'away'] as const) {
     const t = side === 'home' ? home : away;
     for (const p of t.players ?? []) {
       const name = `${p.firstName ?? ''} ${p.lastName ?? ''}`.trim() || p.id;
-      playerById.set(p.id, { name, side, position: typeof p.position === 'number' ? p.position : null, coord: p.coordinates });
+      playerById.set(p.id, { name, side, position: typeof p.position === 'number' ? p.position : null, coord: p.coordinates, throws: typeof p.throws === 'string' ? p.throws : undefined, bats: typeof p.bats === 'string' ? p.bats : undefined });
       for (const tal of p.talents ?? []) if (tal?.id) talentNames.set(tal.id, tal.displayName ?? tal.id);
     }
   }
@@ -1076,6 +1089,7 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
     if (!r) {
       const p = playerById.get(id);
       r = emptyMetrics(id, p?.name ?? id, p?.position ?? null);
+      if (p?.bats) r.bats = p.bats;
       rows.set(id, r);
     }
     return r;
@@ -1132,6 +1146,7 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
     const abId: number | undefined = md.atBatId ?? undefined;
     const batterId: string | undefined = md.batterId ?? undefined;
     const batterSide = batterId ? playerById.get(batterId)?.side : undefined;
+    const oppPitcherHand: string | undefined = md.pitcherId ? playerById.get(md.pitcherId)?.throws : undefined;
 
     if (abId != null && abId !== curAB) {
       flushFielding();
@@ -1271,6 +1286,21 @@ export function extractPlayerMetrics(raw: any, ourTeamId?: string): GameMetrics 
             if (result === 'walk') r.bb++;
             else r.ab++;
             if (result === 'strikeout') r.k++;
+            // Platoon split vs the opposing pitcher's hand.
+            if (oppPitcherHand === 'L' || oppPitcherHand === 'R') {
+              const isHit = HIT_RESULTS.has(result);
+              if (oppPitcherHand === 'L') {
+                r.paVsL++;
+                if (result !== 'walk') r.abVsL++;
+                if (isHit) r.hitsVsL++;
+                if (result === 'strikeout') r.kVsL++;
+              } else {
+                r.paVsR++;
+                if (result !== 'walk') r.abVsR++;
+                if (isHit) r.hitsVsR++;
+                if (result === 'strikeout') r.kVsR++;
+              }
+            }
             if (HIT_RESULTS.has(result)) {
               r.hits++;
               if (result === 'double') r.doubles++;

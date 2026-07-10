@@ -92,10 +92,12 @@ export function emptyMeta(): PlayerMeta {
   return { sim: { ...ZERO_SIM }, talents: [], talentLevels: {}, pitchTalents: [] };
 }
 
-// Talents level up to this cap (the game offers upgrades past Lv3 — confirmed
-// a 4th tier in-game; treated as 5 max). Single source of truth for the level
-// pickers and the effect-scaling clamps.
-export const MAX_TALENT_LEVEL = 5;
+// Talents level up to this cap. Settled by the official Talent Index
+// (2026-07-09): every talent has per-tier data for tiers 1–4 and nothing above
+// — Tier 4 is the max (the old "treated as 5 max" guess was wrong). Stored
+// Lv5 values from before this correction clamp down via Math.min at use sites.
+// Single source of truth for the level pickers and effect-scaling clamps.
+export const MAX_TALENT_LEVEL = 4;
 
 export function getTalentLevel(meta: PlayerMeta, talentName: string): number {
   return meta.talentLevels?.[talentName] ?? 1;
