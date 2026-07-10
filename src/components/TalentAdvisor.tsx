@@ -42,9 +42,11 @@ function TalentOption({
   const inputRef = useRef<HTMLInputElement>(null);
   const dropPos = useDropdownPosition(inputRef, open && !value.name, 288);
 
-  const lower = query.toLowerCase();
+  // Separator-insensitive search: "two seam" must match "Two-Seam Crusher".
+  const norm = (s: string) => s.toLowerCase().replace(/[-\s]+/g, ' ');
+  const lower = norm(query);
   const filtered = query
-    ? ALL_TALENTS.filter((t) => t.name.toLowerCase().includes(lower))
+    ? ALL_TALENTS.filter((t) => norm(t.name).includes(lower))
     : ALL_TALENTS;
 
   const selectedDef = value.name ? ALL_TALENTS.find((t) => t.name === value.name) : undefined;

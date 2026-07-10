@@ -24,10 +24,12 @@ export function TalentPicker({ selected, levels, onChange, onLevelChange, availa
   const listRef = useRef<HTMLUListElement>(null);
 
   const selectedSet = new Set(selected);
-  const lower = query.toLowerCase();
+  // Separator-insensitive search: "two seam" must match "Two-Seam Crusher".
+  const norm = (s: string) => s.toLowerCase().replace(/[-\s]+/g, ' ');
+  const lower = norm(query);
   const filtered = query
     ? talentPool.filter(
-        (t) => !selectedSet.has(t.name) && t.name.toLowerCase().includes(lower),
+        (t) => !selectedSet.has(t.name) && norm(t.name).includes(lower),
       )
     : talentPool.filter((t) => !selectedSet.has(t.name));
 
