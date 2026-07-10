@@ -613,7 +613,7 @@ export function optimizeRoster(
     players: [...virtualPlayers, ...benchPlayers.map((b) => ({ ...b, bench: true }))],
     pitcher,
   };
-  const battingOrder = recommendBattingOrder(virtualTeam, metaStore, battingMode);
+  const battingOrder = recommendBattingOrder(virtualTeam, metaStore, battingMode, fieldingGrades);
 
   return { assignments, options, currentTotalScore, bench: benchAssignments, benchUpgrades, battingOrder, warnings };
 }

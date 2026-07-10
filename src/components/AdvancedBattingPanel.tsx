@@ -43,6 +43,9 @@ const BATTING_COLS: Column[] = [
   { key: 'sweetSpotRate', label: 'Sweet%', title: 'Launch angle 8–32°', get: (p) => p.sweetSpotRate, fmt: pctFmt },
   { key: 'whiffRate', label: 'Whiff%', get: (p) => p.whiffRate, fmt: pctFmt },
   { key: 'chases', label: 'Chase', title: 'Swings out of zone', get: (p) => p.chases, fmt: int },
+  { key: 'avgVsL', label: 'AVG vL', title: 'Batting average vs left-handed pitchers (from matchup sims). Platoon read — pair with handedness talents and start/sit calls. Re-sync to populate; small samples are noisy.', get: (p) => p.avgVsL, fmt: rate3 },
+  { key: 'avgVsR', label: 'AVG vR', title: 'Batting average vs right-handed pitchers (from matchup sims). Re-sync to populate.', get: (p) => p.avgVsR, fmt: rate3 },
+  { key: 'veloFacedAvg', label: 'Velo', title: 'Avg pitch velocity faced. With mph-over-85 exposure, this is the input for valuing the Extinguisher talent (contact per mph above 85).', get: (p) => p.veloFacedAvg, fmt: num1 },
 ];
 
 export function AdvancedBattingPanel({ teamUuid, dataVersion = 0 }: Props) {

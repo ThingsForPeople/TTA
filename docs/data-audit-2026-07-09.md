@@ -12,6 +12,20 @@
 > `firedSwings` for all talent rows; rPAE/spray landing now prefers
 > `ball.flight` geometry (median scale ratio 0.91 vs categorical depths).
 > Item 8's fields remain intentionally unused.
+>
+> **Second wave (same day, branch `deep-analysis-buildout`)** — the analysis layer
+> on top: platoon splits vs pitcher hand (AVG vL/vR in Advanced batting);
+> rPAE/margins/exchange wired into `fieldingGrades`/Best Alignment/position
+> comparison (rPAE-first everywhere); adjacency-aware lineup Monte Carlo
+> (Rally Time / Clutch Cascade next-batter buffs from Talent Index magnitudes ×
+> tier, triggers evaluated in-sim — verified the 2-opt moves chain holders and
+> expected runs respond); bench offense impact (best swap per bench bat in
+> runs/game, common-random-numbers); measured baserunning (run margins + steal
+> jumps) into leadoff/slot-2 fit; **pitchZone decode** (row-major 1-9: 1-3 high,
+> 7-9 low; cols 1/4/7 left, 3/6/9 right catcher-view; 10 = out of zone —
+> verified via zone-talent activations for both hands, `scripts/decode-zones.ts`)
+> → realized zone-talent Cover% in the talents view; buff-state contact added to
+> the Talent Advisor AI context. Also corrected `MAX_TALENT_LEVEL` 5 → 4.
 
 Field-by-field inventory of all four public data sources vs what the parsers
 (`parseTeam.ts`, `parseReplay.ts`) actually consume. Post-patch payloads.

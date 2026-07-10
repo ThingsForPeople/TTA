@@ -15,7 +15,7 @@ import {
   type StatWeights,
   type StatBreakdown,
 } from '../lib/rosterOptimizer';
-import { getSlotTalents, type BattingMode, type BattingSlotRole } from '../lib/analysis';
+import { benchOffenseImpacts, getSlotTalents, type BattingMode, type BattingSlotRole } from '../lib/analysis';
 import { TALENT_BY_NAME } from '../lib/talents';
 import { buildFieldingGrades, type FieldingGrades } from '../lib/fieldingGrades';
 import type { AggregatedPlayer } from '../lib/parseReplay';
@@ -469,7 +469,41 @@ export function FieldPositionsPanel({ team, metaStore, teamUuid, dataVersion = 0
           </div>
         </div>
       )}
+
+      <BenchOffenseSection team={team} metaStore={metaStore} />
     </CollapsiblePanel>
+  );
+}
+
+// Offense side of the bench question: expected runs/game gained by the best
+// straight swap of each benched hitter into the recommended order (seeded
+// lineup Monte Carlo with common random numbers, so deltas are noise-free).
+// Read together with the fielding call-ups above — a bench bat worth +0.2 R/g
+// still has to field a position.
+function BenchOffenseSection({ team, metaStore }: { team: Team; metaStore: PlayerMetaStore }) {
+  const impacts = useMemo(() => benchOffenseImpacts(team, metaStore), [team, metaStore]);
+  const meaningful = impacts.filter((i) => i.runsDelta > 0.02);
+  if (meaningful.length === 0) return null;
+  return (
+    <div className="mt-3 border-t border-slate-800 pt-3">
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+        Bench bat impact (offense)
+      </h3>
+      <div className="space-y-1.5">
+        {meaningful.slice(0, 5).map((i) => (
+          <div key={`${i.bench.uuid}-${i.replaces.uuid}`} className="flex items-center gap-2 text-xs text-slate-400">
+            <span className="font-medium text-emerald-400">{i.bench.name}</span>
+            <span className="text-slate-600">bats #{i.slot} over</span>
+            <span className="text-slate-300">{i.replaces.name}</span>
+            <span className="ml-auto font-mono text-emerald-400">+{i.runsDelta.toFixed(2)} R/g</span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-1.5 text-[10px] text-slate-600">
+        Expected-runs gain from the lineup simulator (chain talents included). Offense only — check the fielding
+        call-ups above before acting: the bench bat still has to man a position, where he may have no measured data.
+      </p>
+    </div>
   );
 }
 

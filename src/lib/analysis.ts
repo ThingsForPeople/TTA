@@ -1,4 +1,6 @@
 import { MAX_TALENT_LEVEL, type PlayerMetaStore } from './playerMeta';
+import { talentIndexByName } from './talentIndex';
+import type { FieldingGrades } from './fieldingGrades';
 import type { Player, Team } from './types';
 import { ZONE_HIT_EFFECT, type ZoneHitEffect } from './talentEffects';
 
@@ -361,7 +363,22 @@ const SLOT_LOCKED_TALENTS: Record<string, number> = {
 // objective so 2-opt starts near the optimum.
 const SLOT_SEED_PRIORITY = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
-function slotFit(p: Player, slot: number, ms: PlayerMetaStore, mult = 1): number {
+// Measured-baserunning bonus for the table-setter slots (2026-07-09): replay
+// close-play margins (negative runMargin = the runner beats throws) and steal
+// jumps replace the raw SPD proxy with an outcome signal. Small — a half-second
+// speed edge is worth ~0.015 wOBA-equivalents of leadoff fit.
+const BR_MARGIN_SCALE = 0.03;
+const BR_CAP = 0.03;
+function measuredBaserunningBonus(p: Player, grades?: FieldingGrades): number {
+  const g = p.uuid ? grades?.[p.uuid] : undefined;
+  if (!g) return 0;
+  let b = 0;
+  if (g.runMargin != null) b += Math.max(-BR_CAP, Math.min(BR_CAP, -g.runMargin * BR_MARGIN_SCALE));
+  if (g.jumpTotal >= 4) b += (g.jumpGreat / g.jumpTotal - 0.3) * 0.02;
+  return b;
+}
+
+function slotFit(p: Player, slot: number, ms: PlayerMetaStore, mult = 1, grades?: FieldingGrades): number {
   const role = SLOT_ROLES[slot];
   const tb = totalTalentBonus(p.uuid, ms, role, mult);
   const pr = profile(p);
@@ -369,8 +386,8 @@ function slotFit(p: Player, slot: number, ms: PlayerMetaStore, mult = 1): number
   switch (slot) {
     // K% mostly double-counts OBP (which already reflects strikeouts), so its
     // marginal leadoff value is ~0 in the data — trimmed 0.4→0.15 (2026-06-29).
-    case 1: return pr.obp * WOBA_SCALE + 0.3 * pr.bbRate - 0.15 * pr.kRate + tb;
-    case 2: return pr.woba + 0.3 * pr.obp + tb;
+    case 1: return pr.obp * WOBA_SCALE + 0.3 * pr.bbRate - 0.15 * pr.kRate + tb + measuredBaserunningBonus(p, grades);
+    case 2: return pr.woba + 0.3 * pr.obp + tb + 0.5 * measuredBaserunningBonus(p, grades);
     case 4: return pr.woba + 0.4 * pr.isoP + tb;
     case 5: return pr.woba - 0.4 * pr.kRate + tb;
     case 8: return pr.obp - 0.3 * pr.kRate + tb;
@@ -428,18 +445,59 @@ const SIM_SEED = 0x9e3779b9; // fixed → deterministic + common-random-numbers
 
 // Expected runs/game for a batting order. `rates` is the per-slot outcome table
 // (precomputed once and reordered by the optimizer to avoid recompute churn).
-function simulateLineupRuns(rates: BatterRates[], games = SIM_GAMES, seed = SIM_SEED): number {
+// Next-batter chain buff (Rally Time / Clutch Cascade): when the holder's PA
+// resolves as a qualifying hit, the NEXT batter's rates improve for one PA.
+// contactBoost shrinks the out probability; powerBoost tilts the freed mass
+// toward extra bases. Magnitudes come from the official Talent Index at the
+// player's tier, damped by CHAIN_CAL because the stated "+N% Contact" acts on
+// an engine lever we can't map 1:1 onto PA outcome rates — the point is the
+// ORDERING signal (put chain holders ahead of good bats), not exact runs.
+export interface ChainBuff {
+  trigger: 'early_hit' | 'hit_runners_on';
+  contactBoost: number; // fraction removed from P(out)
+  powerBoost: number;   // extra-base tilt on the freed probability mass
+}
+const CHAIN_CAL = 0.4;
+// Share of hits that count as "early-count" for Rally Time's trigger.
+const EARLY_HIT_SHARE = 0.55;
+
+function applyChainBuffs(r: BatterRates, buffs: ChainBuff[]): BatterRates {
+  let out = r.out;
+  let { bb, b1, b2, b3, hr } = r;
+  for (const bf of buffs) {
+    const newOut = out * (1 - bf.contactBoost);
+    const freed = out - newOut;
+    out = newOut;
+    // Distribute the freed mass over hit types, tilted toward power.
+    const w1 = b1, w2 = b2 * (1 + bf.powerBoost), w3 = b3 * (1 + bf.powerBoost), wh = hr * (1 + bf.powerBoost);
+    const wsum = w1 + w2 + w3 + wh || 1;
+    b1 += freed * (w1 / wsum);
+    b2 += freed * (w2 / wsum);
+    b3 += freed * (w3 / wsum);
+    hr += freed * (wh / wsum);
+  }
+  return { out, bb, b1, b2, b3, hr };
+}
+
+function simulateLineupRuns(rates: BatterRates[], games = SIM_GAMES, seed = SIM_SEED, chains?: (ChainBuff[] | null)[]): number {
   const n = rates.length;
   if (n === 0) return 0;
   const rand = mulberry32(seed);
   let total = 0;
   for (let g = 0; g < games; g++) {
     let batter = 0, runs = 0;
+    let pending: ChainBuff[] | null = null; // buffs applying to the next PA
     for (let inning = 0; inning < 9; inning++) {
       let outs = 0, first = false, second = false, third = false;
       while (outs < 3) {
-        const r = rates[batter % n]; batter++;
+        const idx = batter % n;
+        const base = rates[idx];
+        const r = pending && pending.length ? applyChainBuffs(base, pending) : base;
+        pending = null;
+        const runnersOnAtSwing = first || second || third;
+        batter++;
         let x = rand();
+        let wasHit = false;
         if (x < r.out) { outs++; continue; }
         x -= r.out;
         if (x < r.bb) { // walk — force only
@@ -448,23 +506,59 @@ function simulateLineupRuns(rates: BatterRates[], games = SIM_GAMES, seed = SIM_
           else if (first) second = true;
           first = true;
         } else if ((x -= r.bb) < r.b1) { // single
+          wasHit = true;
           if (third) runs++;
           third = second; second = first; first = true;
         } else if ((x -= r.b1) < r.b2) { // double
+          wasHit = true;
           if (third) runs++; if (second) runs++;
           third = first; second = true; first = false;
         } else if ((x -= r.b2) < r.b3) { // triple
+          wasHit = true;
           if (first) runs++; if (second) runs++; if (third) runs++;
           first = false; second = false; third = true;
         } else { // home run
+          wasHit = true;
           runs += 1 + (first ? 1 : 0) + (second ? 1 : 0) + (third ? 1 : 0);
           first = second = third = false;
+        }
+        // Arm this batter's chain buffs for the NEXT PA when the trigger fires.
+        if (wasHit && chains) {
+          const ch = chains[idx];
+          if (ch && ch.length) {
+            const fired = ch.filter((bf) =>
+              bf.trigger === 'hit_runners_on' ? runnersOnAtSwing : rand() < EARLY_HIT_SHARE);
+            if (fired.length) pending = fired;
+          }
         }
       }
     }
     total += runs;
   }
   return total / games;
+}
+
+// Extract a player's next-batter chain buffs from their meta talents, with
+// magnitudes from the official Talent Index at the recorded tier.
+const CHAIN_TALENT_TRIGGERS: Record<string, ChainBuff['trigger']> = {
+  'Rally Time': 'early_hit',
+  'Clutch Cascade': 'hit_runners_on',
+};
+export function chainBuffsFor(talents: string[] | undefined, levelFor: (name: string) => number): ChainBuff[] {
+  const out: ChainBuff[] = [];
+  for (const name of talents ?? []) {
+    const trigger = CHAIN_TALENT_TRIGGERS[name];
+    if (!trigger) continue;
+    const idx = talentIndexByName.get(name);
+    const tier = Math.min(Math.max(levelFor(name), 1), MAX_TALENT_LEVEL);
+    const prose = idx?.prose?.perTier?.[String(tier)] ?? idx?.prose?.range ?? '';
+    const contact = /([+-]?\d+(?:\.\d+)?)% Contact/.exec(prose);
+    const power = /([+-]?\d+(?:\.\d+)?)% Power/.exec(prose);
+    const c = contact ? Number(contact[1]) / 100 : 0.15;
+    const p = power ? Number(power[1]) / 100 : 0.15;
+    out.push({ trigger, contactBoost: Math.max(0, c) * CHAIN_CAL, powerBoost: Math.max(0, p) });
+  }
+  return out;
 }
 
 /**
@@ -482,6 +576,7 @@ function buildBattingOrder(
   team: Team,
   ms: PlayerMetaStore,
   mode: BattingMode = 'stat',
+  grades?: FieldingGrades,
 ): BattingOrderResult {
   const mult = TALENT_MODE_MULT[mode];
   const all = team.players ?? [];
@@ -504,7 +599,7 @@ function buildBattingOrder(
   for (const [talent, slot] of useLocks ? Object.entries(SLOT_LOCKED_TALENTS) : []) {
     if (slot > numSlots || lockedHolders.has(slot)) continue;
     const holders = active.filter((p) => hasTalent(p, talent) && !lockedPlayers.has(p));
-    const best = pickHighest(holders, (p) => slotFit(p, slot, ms, mult));
+    const best = pickHighest(holders, (p) => slotFit(p, slot, ms, mult, grades));
     if (best) {
       lockedHolders.set(slot, best);
       lockedPlayers.add(best);
@@ -525,7 +620,7 @@ function buildBattingOrder(
   for (const [slot, p] of lockedHolders) { assign.set(slot, p); used.add(p); }
   for (const slot of SLOT_SEED_PRIORITY) {
     if (slot > numSlots || assign.has(slot)) continue;
-    const pick = pickHighest(starters.filter((p) => !used.has(p)), (p) => slotFit(p, slot, ms, mult));
+    const pick = pickHighest(starters.filter((p) => !used.has(p)), (p) => slotFit(p, slot, ms, mult, grades));
     if (pick) { assign.set(slot, pick); used.add(pick); }
   }
   for (const slot of slotList) {
@@ -539,7 +634,7 @@ function buildBattingOrder(
   //     old indifference among pure-wOBA slots). Talent value is inside slotFit.
   const objective = (a: Map<number, Player>): number => {
     let s = 0;
-    for (const [slot, p] of a) s += SLOT_LEVERAGE[slot] * slotFit(p, slot, ms, mult);
+    for (const [slot, p] of a) s += SLOT_LEVERAGE[slot] * slotFit(p, slot, ms, mult, grades);
     return s;
   };
 
@@ -578,8 +673,22 @@ function buildBattingOrder(
       if (!r) { r = batterRates(p); rateCache.set(p, r); }
       return r;
     };
+    // Chain (next-batter) buffs per player — makes the 2-opt adjacency-aware:
+    // a Rally Time / Clutch Cascade holder is worth more directly AHEAD of a
+    // strong bat, which pure per-slot scoring cannot see.
+    const chainCache = new Map<Player, ChainBuff[]>();
+    const chainsFor = (p: Player) => {
+      let c = chainCache.get(p);
+      if (!c) {
+        const meta = p.uuid ? ms[p.uuid] : undefined;
+        c = chainBuffsFor(meta?.talents, (name) => meta?.talentLevels?.[name] ?? 1);
+        chainCache.set(p, c);
+      }
+      return c;
+    };
     const orderRates = () => filledSlots.map((s) => ratesFor(assign.get(s)!));
-    let bestRuns = simulateLineupRuns(orderRates());
+    const orderChains = () => filledSlots.map((s) => { const c = chainsFor(assign.get(s)!); return c.length ? c : null; });
+    let bestRuns = simulateLineupRuns(orderRates(), SIM_GAMES, SIM_SEED, orderChains());
     if (!useLocks) {
       let reImproved = true, reGuard = 0;
       while (reImproved && reGuard++ < 30) {
@@ -589,7 +698,7 @@ function buildBattingOrder(
             const si = filledSlots[i], sj = filledSlots[j];
             const pi = assign.get(si)!, pj = assign.get(sj)!;
             assign.set(si, pj); assign.set(sj, pi);
-            const cand = simulateLineupRuns(orderRates());
+            const cand = simulateLineupRuns(orderRates(), SIM_GAMES, SIM_SEED, orderChains());
             if (cand > bestRuns + 1e-9) { bestRuns = cand; reImproved = true; }
             else { assign.set(si, pi); assign.set(sj, pj); } // revert
           }
@@ -624,12 +733,60 @@ function buildBattingOrder(
   return { recommended, benched, expectedRuns };
 }
 
+// ── Bench offense impact ──────────────────────────────────────────────
+// For each benched hitter: the single best straight swap into the recommended
+// order, valued in expected runs/game by the same seeded lineup Monte Carlo
+// (common random numbers → deltas are noise-free comparisons, not noise).
+// Defense is deliberately excluded here — the optimizer's benchUpgrades table
+// already covers the fielding side; read the two together.
+export interface BenchOffenseImpact {
+  bench: Player;
+  replaces: Player;
+  slot: number; // 1-9 slot the bench player would take
+  runsDelta: number; // expected runs/game gained (can be negative)
+}
+
+export function benchOffenseImpacts(team: Team, ms: PlayerMetaStore): BenchOffenseImpact[] {
+  const rec = buildBattingOrder(team, ms, 'stat');
+  const order = rec.recommended.map((s) => s.player);
+  if (order.length < 2 || rec.benched.length === 0) return [];
+  const chainsOf = (p: Player) => {
+    const meta = p.uuid ? ms[p.uuid] : undefined;
+    const c = chainBuffsFor(meta?.talents, (name) => meta?.talentLevels?.[name] ?? 1);
+    return c.length ? c : null;
+  };
+  const ratesOf = new Map(order.map((p) => [p, batterRates(p)]));
+  const simFor = (lineup: Player[]) =>
+    simulateLineupRuns(lineup.map((p) => ratesOf.get(p) ?? batterRates(p)), SIM_GAMES, SIM_SEED, lineup.map(chainsOf));
+  const baseline = simFor(order);
+  const out: BenchOffenseImpact[] = [];
+  for (const b of rec.benched) {
+    if (!b.batting) continue;
+    ratesOf.set(b, batterRates(b));
+    let best: BenchOffenseImpact | null = null;
+    for (let i = 0; i < order.length; i++) {
+      const starter = order[i];
+      // Never recommend removing the pitcher (he must play).
+      if (starter.position === 'P' || starter.position === 'SP') continue;
+      const swapped = order.slice();
+      swapped[i] = b;
+      const delta = simFor(swapped) - baseline;
+      if (!best || delta > best.runsDelta) {
+        best = { bench: b, replaces: starter, slot: rec.recommended[i].slot, runsDelta: Math.round(delta * 100) / 100 };
+      }
+    }
+    if (best) out.push(best);
+  }
+  return out.sort((a, b) => b.runsDelta - a.runsDelta);
+}
+
 export function recommendBattingOrder(
   team: Team,
   metaStore?: PlayerMetaStore,
   mode: BattingMode = 'stat',
+  grades?: FieldingGrades,
 ): BattingOrderResult {
-  return buildBattingOrder(team, metaStore ?? {}, mode);
+  return buildBattingOrder(team, metaStore ?? {}, mode, grades);
 }
 
 export interface ColumnExtremes {
