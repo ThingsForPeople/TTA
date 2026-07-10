@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ALL_TALENTS, CATEGORY_COLORS, type TalentDef } from '../lib/talents';
+import { talentMagnitude, talentMagnitudeAtTier } from '../lib/talentIndex';
 import { isPitchSubTalent } from '../lib/talentClassify';
 import { Markdown } from './Markdown';
 import { RateLimitBadge } from './RateLimitBadge';
@@ -83,7 +84,12 @@ function TalentOption({
               {value.name}
             </span>
             {selectedDef && (
-              <span className="text-[10px] text-slate-500 truncate">{selectedDef.description}</span>
+              <span className="text-[10px] text-slate-500 truncate" title={talentMagnitude(selectedDef.id) ?? selectedDef.description}>
+                {selectedDef.description}
+                {talentMagnitude(selectedDef.id) && (
+                  <span className="ml-1 text-emerald-400/80">{talentMagnitude(selectedDef.id)!.split('\n')[0]}</span>
+                )}
+              </span>
             )}
             <button
               type="button"
@@ -155,6 +161,11 @@ function TalentOption({
                 <span className={'text-[10px] ' + CATEGORY_COLORS[t.category]}>{t.category}</span>
               </div>
               <p className="mt-0.5 text-[10px] leading-tight text-slate-500">{t.description}</p>
+              {talentMagnitude(t.id) && (
+                <p className="mt-0.5 text-[10px] leading-tight text-emerald-400/80" title="Official per-tier numbers (Tier 1/2/3/4) from the game's Talent Index">
+                  {talentMagnitude(t.id)!.split('\n')[0]}
+                </p>
+              )}
             </li>
           ))}
           {filtered.length > 30 && (
@@ -264,6 +275,23 @@ export function TalentAdvisor({ players, metaStore, buildContext, buildCompactCo
     const opts = filledOptions.map((opt) => {
       const def = ALL_TALENTS.find((t) => t.name === opt.name);
       const desc = def ? `(${def.category}: ${def.description})` : '';
+      // Official numbers for this pick. For a NEW talent: its Tier-1 value plus
+      // the full T1/2/3/4 progression. For a LEVEL-UP: current-tier vs
+      // next-tier values, so the AI weighs the MARGINAL gain (e.g. +10%→+12%
+      // is a +2% step) against a new talent's full Tier-1 value.
+      const lvlNow = existingTalentLevels.get(opt.name.toLowerCase());
+      const pickTier = Math.min((lvlNow ?? 0) + 1, MAX_TALENT_LEVEL);
+      const magPick = def ? talentMagnitudeAtTier(def.id, pickTier) : null;
+      const magRange = def ? talentMagnitude(def.id) : null;
+      let magNote = '';
+      if (magPick) {
+        if (lvlNow) {
+          const magNow = def ? talentMagnitudeAtTier(def.id, Math.min(lvlNow, MAX_TALENT_LEVEL)) : null;
+          magNote = ` — official numbers: currently T${lvlNow} = ${magNow?.replace(/\n/g, '; ') ?? '?'}; this pick → T${pickTier} = ${magPick.replace(/\n/g, '; ')} (weigh the MARGINAL step, not the total)`;
+        } else {
+          magNote = ` — official numbers at Tier 1: ${magPick.replace(/\n/g, '; ')} (full progression T1/2/3/4: ${magRange?.split('\n')[0] ?? '?'})`;
+        }
+      }
       const pitchNote = opt.forPitch ? ` — applied to ${opt.forPitch}` : '';
       const nameLower = opt.name.toLowerCase();
       const existingLvl = existingTalentLevels.get(nameLower);
@@ -275,7 +303,7 @@ export function TalentAdvisor({ players, metaStore, buildContext, buildCompactCo
           ownershipNote = ` ℹ️ Already owned at Lv${existingLvl} — this would LEVEL UP to Lv${existingLvl + 1}`;
         }
       }
-      return `**${opt.name}** ${desc}${pitchNote}${ownershipNote}`;
+      return `**${opt.name}** ${desc}${magNote}${pitchNote}${ownershipNote}`;
     });
     lines.push('');
     lines.push('The talent options are:');
@@ -286,6 +314,9 @@ export function TalentAdvisor({ players, metaStore, buildContext, buildCompactCo
       'while "MAX LEVEL" means the talent cannot be leveled further (not a valid pick). ' +
       'All picks cost the same — leveling up an existing talent costs no more or less than adding a new one, ' +
       'so judge purely on effect and synergy, not on whether it is a level-up vs. a new talent. ' +
+      'When official numbers are shown, compare a level-up by its MARGINAL step (next tier minus current tier) ' +
+      'against a new talent\'s full Tier-1 value — a +2% step on an owned talent usually loses to a fresh +6% ' +
+      'unless the owned talent fires far more often or compounds (per-charge / per-pitch effects multiply the step). ' +
       'Consider: synergy with existing talents and pitch repertoire, ' +
       "how it fits the player's position and stats, and whether any option is clearly better or worse. " +
       'Give a clear recommendation with reasoning. Be concise — bullets, not paragraphs.' +
