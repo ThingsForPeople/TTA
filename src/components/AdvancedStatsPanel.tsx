@@ -818,7 +818,7 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
   return (
     <CollapsiblePanel
       title="Advanced fielding"
-      subtitle="Fielding metrics derived from game replays. Since the July 2026 patch, replays are matchup RE-SIMULATIONS under the current engine (not recordings of the actual games), so these metrics measure expected performance in your matchups rather than what literally happened — still valid for comparing fielders and positions. Sync processes the most-recent 100 games (older stored games are pruned) and also feeds Advanced batting in the Batting section."
+      subtitle="Fielding metrics derived from game replays. Since the July 2026 patch, replays are matchup RE-SIMULATIONS: they keep each game's actual rosters, positions, lineup, and talents (verified) but re-roll the outcome under the current engine — so these metrics measure expected performance rather than what literally happened, while the position/talent history is faithful. Sync processes the most-recent 100 games (older stored games are pruned) and also feeds Advanced batting in the Batting section."
       headerAction={
         <div className="flex items-center gap-1.5">
           <button

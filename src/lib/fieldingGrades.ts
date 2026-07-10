@@ -16,6 +16,11 @@ export interface FieldingGrade {
   // Range-aware PAE/game (charges unreached nearest-fielder balls) — the
   // post-patch skill separator. Preferred over paePerGame when populated.
   rangePaePerGame: number | null;
+  // Per-POSITION anchors from the byPosition splits (2026-07-10 audit fix):
+  // the empirical bonus anchors at ANY position with enough games, not just
+  // the most-played one — a player with 20 G at 2B and 12 G at SS previously
+  // got ZERO empirical anchor when evaluated at SS despite 12 games of data.
+  byPos: Record<string, { games: number; anchorPerGame: number; basesSavedPerGame: number }>;
   armAvg: number | null;
   armZ: number; // arm evidence relative to the team (z-score; speed + margin)
   fieldPct: number | null;
@@ -70,12 +75,23 @@ export function buildFieldingGrades(players: AggregatedPlayer[]): FieldingGrades
     const armAvg = sp?.armAvg ?? p.armAvg;
     const speedZ = armAvg != null ? (armAvg - mean) / std : 0;
     const marginZ = p.throwMarginN >= 8 && p.throwMargin != null ? (p.throwMargin - mMean) / mStd : null;
+    const byPos: FieldingGrade['byPos'] = {};
+    for (const s of p.byPosition ?? []) {
+      const ps = POS_NUM_TO_STR[s.position];
+      if (!ps || s.games <= 0) continue;
+      byPos[ps] = {
+        games: s.games,
+        anchorPerGame: s.rangePaePerGame ?? s.paePerGame,
+        basesSavedPerGame: s.games > 0 ? (s.basesSaved ?? 0) / s.games : 0,
+      };
+    }
     grades[p.playerId] = {
       games,
       primaryPos: p.position != null ? POS_NUM_TO_STR[p.position] ?? null : null,
       pae,
       paePerGame: games > 0 ? pae / games : 0,
       rangePaePerGame: sp?.rangePaePerGame ?? p.rangePaePerGame ?? null,
+      byPos,
       armAvg,
       armZ: marginZ != null ? (1 - ARM_MARGIN_WEIGHT) * speedZ + ARM_MARGIN_WEIGHT * marginZ : speedZ,
       fieldPct: sp?.fieldPct ?? p.fieldPct,
@@ -114,29 +130,32 @@ export function empiricalFieldingBonus(
 ): number {
   if (!playerUuid || !grades) return 0;
   const g = grades[playerUuid];
-  if (!g || g.games < MIN_GAMES) return 0;
+  if (!g) return 0;
 
   let bonus = 0;
-  // Position-anchored PAE — the primary, non-redundant signal. Post-patch,
-  // engaged-chance PAE is nearly saturated (fielders convert ~100% of reached
-  // balls), so prefer the range-aware rPAE (charges unreached balls) when the
-  // re-synced data provides it.
-  if (g.primaryPos === position) {
-    const conf = Math.min(g.games / 25, 1);
-    const anchor = g.rangePaePerGame ?? g.paePerGame;
-    bonus += clamp(anchor * PAE_SCALE, -PAE_CAP, PAE_CAP) * conf;
+  // Position-anchored PAE — anchored at the split the player actually earned AT
+  // THIS position (2026-07-10 audit fix: previously only the most-played
+  // position anchored, so real data at a secondary spot was ignored).
+  // Post-patch, engaged-chance PAE is nearly saturated, so the split's anchor
+  // prefers the range-aware rPAE (falls back to plain PAE pre-re-sync).
+  const split = g.byPos[position];
+  if (split && split.games >= MIN_GAMES) {
+    const conf = Math.min(split.games / 25, 1);
+    bonus += clamp(split.anchorPerGame * PAE_SCALE, -PAE_CAP, PAE_CAP) * conf;
     // Outfield value PAE can't see: extra-base suppression (bases saved). Only
     // at OF, where most "chances" are retrievals rather than out opportunities.
-    if (OF_POSITIONS.has(position) && g.basesSavedPerGame) {
-      bonus += clamp(g.basesSavedPerGame * BASES_SAVED_SCALE, -BASES_SAVED_CAP, BASES_SAVED_CAP) * conf;
+    if (OF_POSITIONS.has(position) && split.basesSavedPerGame) {
+      bonus += clamp(split.basesSavedPerGame * BASES_SAVED_SCALE, -BASES_SAVED_CAP, BASES_SAVED_CAP) * conf;
     }
-    // Measured exchange quality: reward clean-hands throwers, debit bobblers.
+    // Measured exchange quality (player-level): clean hands travel with the
+    // player, so apply wherever an anchor exists.
     const exch = (g.releaseGreatRate != null ? (g.releaseGreatRate - 0.5) * 4 : 0) - g.bobblesPerGame * 6;
     bonus += clamp(exch, -EXCHANGE_CAP, EXCHANGE_CAP) * conf;
   }
   // Transferable arm: a measured strong/weak arm matters most where arm matters.
-  // (armZ now blends throw speed with the close-play margin outcome signal.)
-  bonus += g.armZ * ARM_SCALE * armImportance;
+  // (armZ blends throw speed with the close-play margin outcome signal.) Gated
+  // on overall sample so tiny-sample z-scores don't leak in.
+  if (g.games >= MIN_GAMES) bonus += g.armZ * ARM_SCALE * armImportance;
   return Math.round(bonus * 10) / 10;
 }
 

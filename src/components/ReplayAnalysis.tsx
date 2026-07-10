@@ -42,9 +42,10 @@ export function ReplayAnalysis({ teamUuid, gameId }: Props) {
   return (
     <div className="space-y-5">
       <div className="rounded-md border border-sky-500/40 bg-sky-500/10 px-3 py-1.5 text-xs text-sky-200">
-        <strong>Matchup re-sim.</strong> Since the July 2026 patch, replays are re-simulations of the
-        matchup under the current engine — the score and player lines here can differ from the official
-        box score. Read this for process and tendencies, not as the literal game that happened.
+        <strong>Matchup re-sim.</strong> Since the July 2026 patch, replays re-roll the game under the
+        current engine using the game-time rosters, positions, lineup, and talents (verified identical to
+        the box score) — but the outcome is re-simulated, so the score and player lines here can differ
+        from the official result. Read this for process and tendencies, not as the literal game.
       </div>
       {!data.matched && (
         <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-200">
