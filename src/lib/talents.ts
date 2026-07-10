@@ -2,8 +2,7 @@ export interface TalentDef {
   id: string;
   name: string;
   description: string;
-  // 'gauntlet' talents are only offered/active in Gauntlet mode.
-  category: 'hitting' | 'pitching' | 'fielding' | 'baserunning' | 'gauntlet';
+  category: 'hitting' | 'pitching' | 'fielding' | 'baserunning';
 }
 
 const TALENTS: TalentDef[] = [
@@ -146,14 +145,6 @@ const TALENTS: TalentDef[] = [
   // live in talentIndex.json.
   { id: 'extinguisher', name: 'Extinguisher', description: 'The harder they throw, the better this batter sees it — contact grows with every mph over 85.', category: 'hitting' },
   { id: 'master_of_none', name: 'Master of None', description: 'A deep arsenal sharpens every pitch — velocity and movement grow with each unique pitch the pitcher has unlocked.', category: 'pitching' },
-  // Gauntlet-mode PICKABLE talents (offered in Gauntlet runs — the Talent
-  // Advisor must be able to represent those choices). The gauntlet_affix_*
-  // entries in the index (Dead Arm, Heavy Bat, Leaden Legs, Wet Gloves) are
-  // DEBUFFS the mode inflicts, not choices, and stay excluded from this list.
-  { id: 'gauntlet_talent_heavy_lumber', name: 'Heavy Lumber', description: 'Gauntlet only: batters cut through affix penalties with better contact.', category: 'gauntlet' },
-  { id: 'gauntlet_talent_iron_shoulder', name: 'Iron Shoulder', description: 'Gauntlet only: pitchers gain back velocity despite gauntlet fatigue.', category: 'gauntlet' },
-  { id: 'gauntlet_talent_second_wind', name: 'Second Wind', description: 'Gauntlet only: runners recover burst and late-game legs.', category: 'gauntlet' },
-  { id: 'gauntlet_talent_sure_grip', name: 'Sure Grip', description: 'Gauntlet only: fielders keep strong throws under pressure.', category: 'gauntlet' },
 ];
 
 export const ALL_TALENTS = TALENTS;
@@ -172,6 +163,5 @@ export const CATEGORY_COLORS: Record<TalentDef['category'], string> = {
   pitching: 'text-amber-300',
   fielding: 'text-emerald-300',
   baserunning: 'text-violet-300',
-  gauntlet: 'text-rose-300',
 };
 
