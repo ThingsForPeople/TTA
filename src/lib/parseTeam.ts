@@ -36,6 +36,7 @@ export interface RawPlayer {
   pitching_hits?: number | null;
   pitching_strikeouts?: number | null;
   innings_pitched?: number | null;
+  runs_allowed?: number | null;
   putouts?: number | null;
   assists?: number | null;
   errors?: number | null;
@@ -154,7 +155,9 @@ const u = <T>(v: T | null | undefined): T | undefined => (v == null ? undefined 
 
 export function mapPlayer(rp: RawPlayer): Player {
   const fullName = [rp.first_name, rp.last_name].filter(Boolean).join(' ').trim();
-  const isPitcher = rp.position === 'P' || rp.position === 'SP';
+  // Pitching stats belong to anyone who has PITCHED, not just players listed at
+  // P — a Two Way slotted at another position was silently losing ERA/WHIP/IP/K.
+  const isPitcher = rp.position === 'P' || rp.position === 'SP' || (rp.innings_pitched ?? 0) > 0;
   return {
     uuid: rp.player_id,
     name: fullName,
@@ -193,6 +196,7 @@ export function mapPlayer(rp: RawPlayer): Player {
           bb: u(rp.pitching_walks),
           h: u(rp.pitching_hits),
           pitches: u(rp.pitches_thrown),
+          runsAllowed: u(rp.runs_allowed),
         }
       : undefined,
     fielding:

@@ -25,6 +25,7 @@ export interface PitchingStats {
   bb?: number;
   h?: number;
   pitches?: number;
+  runsAllowed?: number;
 }
 
 export interface FieldingStats {

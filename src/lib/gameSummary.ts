@@ -66,10 +66,12 @@ export function buildGameContext(ev: ReplayEvaluation, includeNote = true): stri
     lines.push('## Our pitching');
     lines.push(
       `- ${p.name}: ${p.pitches} pitches, ${pct(p.whiffs, p.swings)}% whiff (${p.swings} swings), ` +
-      `${p.calledStrikes} called strikes, ${p.balls} balls, ${p.mistakes} mistake pitches`,
+      `${p.calledStrikes} called strikes, ${p.balls} balls, ${p.mistakes} mistake pitches, ` +
+      `${pct(p.overpowered ?? 0, p.pitches)}% overpowered (the engine roll behind whiffs — higher is better for the pitcher)`,
     );
     for (const t of p.byType) {
-      lines.push(`  - ${t.label}: ${t.count} thrown, ${t.swings} sw, ${t.whiffs} whiff (${pct(t.whiffs, t.swings)}%), ${t.inPlay} in play`);
+      const velo = t.veloCount > 0 ? `, ${(t.veloSum / t.veloCount).toFixed(1)} avg velo` : '';
+      lines.push(`  - ${t.label}: ${t.count} thrown, ${t.swings} sw, ${t.whiffs} whiff (${pct(t.whiffs, t.swings)}%), ${t.inPlay} in play, ${pct(t.overpowered ?? 0, t.count)}% overpowered${velo}`);
     }
     lines.push('');
   }
