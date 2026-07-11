@@ -75,11 +75,19 @@ function profile(p: Player): PlayerProfile | undefined {
   // .440/.430 — do not revert to them. Refit as more post-patch data lands.
   // TODO: derive from the team/league population at runtime for self-calibration.
   const confidence = Math.min(pa / RELIABLE_PA, 1);
+  // Regress toward REPLACEMENT level (below league average), not the league
+  // mean. Regressing to the MEAN lets a tiny-sample .141 line float ABOVE
+  // proven hitters whose real production sits below average — under filtered
+  // small-PA windows that put unknowns in the heart of the order (reported:
+  // .141 AVG recommended at #5). For ORDERING, an unproven bat should rank
+  // below demonstrated performers until the sample says otherwise.
   const LEAGUE_AVG_WOBA = 0.352;
   const LEAGUE_AVG_OBP = 0.320;
-  const regressedWoba = confidence * woba + (1 - confidence) * LEAGUE_AVG_WOBA;
+  const REPLACEMENT_WOBA = LEAGUE_AVG_WOBA * 0.85;
+  const REPLACEMENT_OBP = LEAGUE_AVG_OBP * 0.85;
+  const regressedWoba = confidence * woba + (1 - confidence) * REPLACEMENT_WOBA;
   const rawObp = b.obp ?? (pa > 0 ? ((b.h ?? 0) + bb) / pa : 0);
-  const regressedObp = confidence * rawObp + (1 - confidence) * LEAGUE_AVG_OBP;
+  const regressedObp = confidence * rawObp + (1 - confidence) * REPLACEMENT_OBP;
 
   return {
     pa,
@@ -689,6 +697,12 @@ function buildBattingOrder(
     const orderRates = () => filledSlots.map((s) => ratesFor(assign.get(s)!));
     const orderChains = () => filledSlots.map((s) => { const c = chainsFor(assign.get(s)!); return c.length ? c : null; });
     let bestRuns = simulateLineupRuns(orderRates(), SIM_GAMES, SIM_SEED, orderChains());
+    // Only let the sim override the role-based order for a MEANINGFUL gain.
+    // With near-equal hitters the run surface is almost flat; accepting any
+    // +1e-9 wobble reshuffled good bats into goofy-looking slots (a .377
+    // hitter 9th behind the pitcher) for ~0.001 expected runs. 0.02 R/g over
+    // 1000 seeded games is comfortably above common-random-number noise.
+    const MIN_SIM_GAIN = 0.02;
     if (!useLocks) {
       let reImproved = true, reGuard = 0;
       while (reImproved && reGuard++ < 30) {
@@ -699,7 +713,7 @@ function buildBattingOrder(
             const pi = assign.get(si)!, pj = assign.get(sj)!;
             assign.set(si, pj); assign.set(sj, pi);
             const cand = simulateLineupRuns(orderRates(), SIM_GAMES, SIM_SEED, orderChains());
-            if (cand > bestRuns + 1e-9) { bestRuns = cand; reImproved = true; }
+            if (cand > bestRuns + MIN_SIM_GAIN) { bestRuns = cand; reImproved = true; }
             else { assign.set(si, pi); assign.set(sj, pj); } // revert
           }
         }
@@ -708,11 +722,20 @@ function buildBattingOrder(
     expectedRuns = Math.round(bestRuns * 100) / 100;
   }
 
+  // The run simulator often lands on the classic "pitcher bats 8th" shape:
+  // the weakest bat at #8 with a strong on-base bat at #9 feeding the top of
+  // the order. It's a genuine expected-runs gain (only accepted above
+  // MIN_SIM_GAIN), but unexplained it reads as a bug — so label it.
+  const p8 = assign.get(8), p9 = assign.get(9);
+  const simTurnover = p8 && p9 && (profile(p9)?.woba ?? 0) > (profile(p8)?.woba ?? 0) + 0.03;
+
   const recommended: BattingSlot[] = slotList
     .filter((slot) => assign.has(slot))
     .map((slot) => {
       const player = assign.get(slot)!;
       let reason = SLOT_REASON[slot];
+      if (simTurnover && slot === 8) reason = '#8 — weakest bat hidden here: the run simulator gains by batting the better on-base bat #9 to feed the top of the order (the "pitcher bats 8th" pattern)';
+      if (simTurnover && slot === 9) reason = '#9 — second leadoff: turns the order over into the top with runners aboard';
       if (useLocks) {
         for (const [talent, lockedSlot] of Object.entries(SLOT_LOCKED_TALENTS)) {
           if (lockedSlot === slot && hasTalent(player, talent)) {
