@@ -100,9 +100,14 @@ function profile(p: Player): PlayerProfile | undefined {
 }
 
 // ── Talent value system ─────────────────────────────────────────────
-// Talents already show in stats, so these bonuses are small refinements
-// that tip tiebreakers — not primary drivers. A talent-stacked player
-// won't leapfrog someone with clearly better stats.
+// Talents influence the batting order ONLY through slot-role affinity
+// ("slot synergies"): a talent scores where its effect is worth more in a
+// specific lineup spot (Table Setter at leadoff, runners-on talents in the
+// 3–5 pocket). Slot-AGNOSTIC talent value (Breakout Season, Night Owl, zone
+// boosts, …) already shows up in the player's stats — scoring it again just
+// lifted talent-stacked players at every slot without changing which slot
+// fits them (removed 2026-07-16; entries with empty roles are kept as
+// explicit "no slot lean" documentation).
 //
 // Values are in wOBA-equivalent units, scaled by TALENT_WEIGHT (0.15)
 // so a Tier-3 talent adds ~0.006 wOBA to the slot score (more at Tier 4, the max).
@@ -122,7 +127,6 @@ const TALENT_WEIGHT = 0.15;
 
 interface TalentValue {
   roles: Partial<Record<SlotRole, number>>;
-  global?: number;
 }
 
 export const TALENT_VALUES: Record<string, TalentValue> = {
@@ -132,51 +136,51 @@ export const TALENT_VALUES: Record<string, TalentValue> = {
   'The Janitor':        { roles: { cleanup: 0.20, best: -0.40, quality: -0.40, leadoff: -0.40, protection: -0.10, lower: -0.10 } },
 
   // ── OBP / plate discipline → leadoff, quality ──
-  'Disciplined':        { roles: { leadoff: 0.06, quality: 0.04 }, global: 0.02 },
-  'Fear Me':            { roles: { leadoff: 0.05, quality: 0.03 }, global: 0.01 },
-  'Battler':            { roles: { leadoff: 0.04, quality: 0.03 }, global: 0.02 },
+  'Disciplined':        { roles: { leadoff: 0.06, quality: 0.04 } },
+  'Fear Me':            { roles: { leadoff: 0.05, quality: 0.03 } },
+  'Battler':            { roles: { leadoff: 0.04, quality: 0.03 } },
 
   // ── Contact / early-count → leadoff, quality ──
-  'Set the Tone':       { roles: { leadoff: 0.05, quality: 0.04 }, global: 0.03 },
-  'Early Bird':         { roles: { leadoff: 0.06, quality: 0.05 }, global: 0.03 },
-  'Off Speed Tracker':  { roles: {}, global: 0.03 },
+  'Set the Tone':       { roles: { leadoff: 0.05, quality: 0.04 } },
+  'Early Bird':         { roles: { leadoff: 0.06, quality: 0.05 } },
+  'Off Speed Tracker':  { roles: {} },
 
   // ── Power talents → cleanup, best, protection ──
-  'Sweet Tooth':        { roles: { cleanup: 0.06, best: 0.04, protection: 0.04 }, global: 0.02 },
-  'Knowledge is Power': { roles: { cleanup: 0.04, protection: 0.03 }, global: 0.02 },
+  'Sweet Tooth':        { roles: { cleanup: 0.06, best: 0.04, protection: 0.04 } },
+  'Knowledge is Power': { roles: { cleanup: 0.04, protection: 0.03 } },
 
   // ── Runners-on talents → best(3), cleanup(4), protection(5) ──
-  'Clutch':             { roles: { best: 0.07, cleanup: 0.06, protection: 0.05 }, global: 0.02 },
-  'Pressure Cooker':    { roles: { best: 0.05, cleanup: 0.05, protection: 0.04 }, global: 0.01 },
+  'Clutch':             { roles: { best: 0.07, cleanup: 0.06, protection: 0.05 } },
+  'Pressure Cooker':    { roles: { best: 0.05, cleanup: 0.05, protection: 0.04 } },
   // Bumped 2026-06-29: replay analysis found Mental Warfare the single biggest
   // contact-quality swing of any hitting talent (+7.8 EV when it fires, with
   // runners on), so it earns a stronger runners-on (best/cleanup/protection) tilt.
-  'Mental Warfare':     { roles: { best: 0.05, cleanup: 0.05, protection: 0.04 }, global: 0.03 },
+  'Mental Warfare':     { roles: { best: 0.05, cleanup: 0.05, protection: 0.04 } },
 
   // ── Chain / next-batter talents → higher in order to maximize downstream ──
-  'Clutch Cascade':     { roles: { best: 0.05, cleanup: 0.04, quality: 0.04 }, global: 0.02 },
-  'Rally Time':         { roles: { leadoff: 0.05, quality: 0.05, best: 0.04 }, global: 0.02 },
-  'Confidence Shaker':  { roles: { leadoff: 0.04, quality: 0.04, best: 0.03 }, global: 0.02 },
-  'Waste No Time':      { roles: { leadoff: 0.05, quality: 0.04 }, global: 0.02 },
+  'Clutch Cascade':     { roles: { best: 0.05, cleanup: 0.04, quality: 0.04 } },
+  'Rally Time':         { roles: { leadoff: 0.05, quality: 0.05, best: 0.04 } },
+  'Confidence Shaker':  { roles: { leadoff: 0.04, quality: 0.04, best: 0.03 } },
+  'Waste No Time':      { roles: { leadoff: 0.05, quality: 0.04 } },
 
   // ── Exhausting / grind talents → quality, leadoff (more PAs) ──
-  'Exhausting':         { roles: { leadoff: 0.04, quality: 0.04 }, global: 0.02 },
-  'Pattern Recognition':{ roles: { quality: 0.03 }, global: 0.02 },
+  'Exhausting':         { roles: { leadoff: 0.04, quality: 0.04 } },
+  'Pattern Recognition':{ roles: { quality: 0.03 } },
 
-  // ── Situational / conditional ──
-  'Breakout Season':    { roles: {}, global: 0.03 },
-  'Sun Glasses':        { roles: {}, global: 0.02 },
-  'Night Owl':          { roles: {}, global: 0.02 },
-  'Lefty Loosey':       { roles: {}, global: 0.03 },
-  'Righty Tighty':      { roles: {}, global: 0.03 },
-  'Hard to Handle':     { roles: {}, global: 0.02 },
+  // ── Situational / conditional — no slot lean; value is in the stats ──
+  'Breakout Season':    { roles: {} },
+  'Sun Glasses':        { roles: {} },
+  'Night Owl':          { roles: {} },
+  'Lefty Loosey':       { roles: {} },
+  'Righty Tighty':      { roles: {} },
+  'Hard to Handle':     { roles: {} },
 
   // ── Zone hitting talents (general and directional) ──
-  'Zone Dialed':        { roles: {}, global: 0.03 },
-  'Zone Driver':        { roles: { best: 0.02, cleanup: 0.02 }, global: 0.02 },
-  'Zone Chopper':       { roles: { leadoff: 0.02 }, global: 0.01 },
-  'Zone Popper':        { roles: { cleanup: 0.02 }, global: 0.01 },
-  'Zone Hacker':        { roles: { cleanup: 0.02, best: 0.01 }, global: 0.01 },
+  'Zone Dialed':        { roles: {} },
+  'Zone Driver':        { roles: { best: 0.02, cleanup: 0.02 } },
+  'Zone Chopper':       { roles: { leadoff: 0.02 } },
+  'Zone Popper':        { roles: { cleanup: 0.02 } },
+  'Zone Hacker':        { roles: { cleanup: 0.02, best: 0.01 } },
 };
 
 // Role tilts per directional-zone effect family. The effect word (Driver,
@@ -191,9 +195,9 @@ const ZONE_EFFECT_ROLES: Record<ZoneHitEffect, Partial<Record<SlotRole, number>>
   Hacker:  {},                                           // raw aggression, double-edged → no slot lean
 };
 
-// Directional zone talents ("High Driver", "Inside Popper", …) are differentiated
-// by their effect family's batted-ball outcome rank instead of a flat bonus, so a
-// line-drive Driver outweighs a swing-only Hacker as a lineup tiebreaker.
+// Directional zone talents ("High Driver", "Inside Popper", …) carry only
+// their effect family's slot-role tilt (Driver → best/cleanup, Chopper →
+// leadoff, …); the raw magnitude of the boost is already in the stats.
 const ZONE_DIR_PREFIXES = ['High', 'Low', 'Inside', 'Outside'];
 // Names of the directional zone talents. They influence slot SCORING but are
 // hidden from the displayed "synergies" list — every hitter tends to carry
@@ -204,11 +208,7 @@ for (const prefix of ZONE_DIR_PREFIXES) {
     const name = `${prefix} ${effect}`;
     ZONE_DIR_TALENT_NAMES.add(name);
     if (TALENT_VALUES[name]) continue;
-    const { rank } = ZONE_HIT_EFFECT[effect];
-    TALENT_VALUES[name] = {
-      roles: ZONE_EFFECT_ROLES[effect],
-      global: 0.008 + 0.004 * rank, // Driver 0.028 … Hacker 0.012
-    };
+    TALENT_VALUES[name] = { roles: ZONE_EFFECT_ROLES[effect] };
   }
 }
 
@@ -226,13 +226,11 @@ function talentBonus(
 
   let bonus = 0;
   for (const talentName of meta.talents) {
-    const tv = TALENT_VALUES[talentName];
-    if (!tv) continue;
+    const roleVal = TALENT_VALUES[talentName]?.roles[role];
+    if (!roleVal) continue;
     const lvl = meta.talentLevels?.[talentName] ?? 1;
     const scale = LEVEL_SCALE[Math.min(lvl, MAX_TALENT_LEVEL)] ?? 1;
-    const roleVal = tv.roles[role] ?? 0;
-    const globalVal = tv.global ?? 0;
-    bonus += (roleVal + globalVal) * scale;
+    bonus += roleVal * scale;
   }
   return bonus * TALENT_WEIGHT;
 }
