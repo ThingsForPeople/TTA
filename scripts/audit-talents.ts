@@ -19,7 +19,10 @@
  */
 import { ALL_TALENTS, TALENT_BY_NAME } from '../src/lib/talents';
 import { TALENT_ENGINE_EFFECTS, type EngineStat } from '../src/lib/talentEffects';
-import { TALENT_VALUES, BASERUNNING_VALUES } from '../src/lib/analysis';
+import { TALENT_VALUES } from '../src/lib/analysis';
+// Baserunning talents were deliberately RETIRED from batting-order value
+// (steal attempts measure run-negative post-patch) — still 'considered'.
+const RETIRED_BASERUNNING = ['Thief', 'Quick Silver', 'Evasive', 'Anticipation', 'Hustler', 'Worthy Sacrifice'];
 import { FIELDING_TALENT_RULES } from '../src/lib/rosterOptimizer';
 
 const POWER_SLOTS = ['best', 'cleanup', 'protection'] as const;
@@ -35,7 +38,7 @@ const direction: string[] = [];
 // ── 1. Typo guard: every classified name must exist in talents.ts ──
 const classifiedNames = new Set<string>([
   ...Object.keys(TALENT_VALUES),
-  ...Object.keys(BASERUNNING_VALUES),
+  ...RETIRED_BASERUNNING,
   ...Object.keys(FIELDING_TALENT_RULES),
 ]);
 for (const name of classifiedNames) {
@@ -45,7 +48,7 @@ for (const name of classifiedNames) {
 }
 
 // ── 2. Coverage: talents with a known engine effect but unclassified ──
-const handledOffense = new Set([...Object.keys(TALENT_VALUES), ...Object.keys(BASERUNNING_VALUES)]);
+const handledOffense = new Set([...Object.keys(TALENT_VALUES), ...RETIRED_BASERUNNING]);
 for (const t of ALL_TALENTS) {
   const effects = TALENT_ENGINE_EFFECTS[t.name];
   if (!effects) continue; // no replay observation → nothing to check

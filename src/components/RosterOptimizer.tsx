@@ -15,7 +15,7 @@ import {
   type StatWeights,
   type StatBreakdown,
 } from '../lib/rosterOptimizer';
-import { benchOffenseImpacts, getSlotTalents, type BattingMode, type BattingSlotRole } from '../lib/analysis';
+import { benchOffenseImpacts, getSlotTalents, platoonDeltas, type BattingMode, type BattingSlotRole, type PlatoonSplitSource } from '../lib/analysis';
 import { TALENT_BY_NAME } from '../lib/talents';
 import { buildFieldingGrades, type FieldingGrades } from '../lib/fieldingGrades';
 import type { AggregatedPlayer } from '../lib/parseReplay';
@@ -37,10 +37,11 @@ function useOptimization(
   statWeights?: StatWeights,
   fieldingGrades?: FieldingGrades,
   battingMode: BattingMode = 'stat',
+  platoonDelta?: Record<string, number>,
 ): RosterOptimization {
   return useMemo(
-    () => optimizeRoster(team, metaStore, positionImportance, statWeights, fieldingGrades, battingMode),
-    [team, metaStore, positionImportance, statWeights, fieldingGrades, battingMode],
+    () => optimizeRoster(team, metaStore, positionImportance, statWeights, fieldingGrades, battingMode, platoonDelta),
+    [team, metaStore, positionImportance, statWeights, fieldingGrades, battingMode, platoonDelta],
   );
 }
 
@@ -476,10 +477,10 @@ export function FieldPositionsPanel({ team, metaStore, teamUuid, dataVersion = 0
 }
 
 // Offense side of the bench question: expected runs/game gained by the best
-// straight swap of each benched hitter into the recommended order (seeded
-// lineup Monte Carlo with common random numbers, so deltas are noise-free).
-// Read together with the fielding call-ups above — a bench bat worth +0.2 R/g
-// still has to field a position.
+// straight swap of each benched hitter into the recommended order (exact
+// Markov run model — deltas are exact, not simulation noise). Read together
+// with the fielding call-ups above — a bench bat worth +0.2 R/g still has to
+// field a position.
 function BenchOffenseSection({ team, metaStore }: { team: Team; metaStore: PlayerMetaStore }) {
   const impacts = useMemo(() => benchOffenseImpacts(team, metaStore), [team, metaStore]);
   const meaningful = impacts.filter((i) => i.runsDelta > 0.02);
@@ -500,7 +501,7 @@ function BenchOffenseSection({ team, metaStore }: { team: Team; metaStore: Playe
         ))}
       </div>
       <p className="mt-1.5 text-[10px] text-slate-600">
-        Expected-runs gain from the lineup simulator (chain talents included). Offense only — check the fielding
+        Expected-runs gain from the exact run model (chain talents included). Offense only — check the fielding
         call-ups above before acting: the bench bat still has to man a position, where he may have no measured data.
       </p>
     </div>
@@ -511,8 +512,28 @@ function BenchOffenseSection({ team, metaStore }: { team: Team; metaStore: Playe
 
 export function OptimalBattingOrder({ team, metaStore }: Props) {
   const [mode, setMode] = useState<BattingMode>('stat');
+  // Platoon variant: order the lineup for a specific opposing pitcher hand
+  // using the replay-derived splits (fetched lazily on first use).
+  const [vsHand, setVsHand] = useState<'' | 'L' | 'R'>('');
+  const [splits, setSplits] = useState<PlatoonSplitSource[] | null>(null);
+  useEffect(() => {
+    if (!vsHand || splits || !team.uuid) return;
+    let cancelled = false;
+    fetch(`/api/team/${team.uuid}/replay-metrics`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { players?: PlatoonSplitSource[] } | null) => {
+        if (!cancelled) setSplits(data?.players ?? []);
+      })
+      .catch(() => { if (!cancelled) setSplits([]); });
+    return () => { cancelled = true; };
+  }, [vsHand, splits, team.uuid]);
+  const platoonDelta = useMemo(
+    () => (vsHand && splits?.length ? platoonDeltas(splits, vsHand) : undefined),
+    [vsHand, splits],
+  );
+
   const { battingOrder: displayOrder } = useOptimization(
-    team, metaStore, undefined, undefined, undefined, mode,
+    team, metaStore, undefined, undefined, undefined, mode, platoonDelta,
   );
 
   return (
@@ -520,26 +541,39 @@ export function OptimalBattingOrder({ team, metaStore }: Props) {
       title="Recommended batting order"
       subtitle={
         (mode === 'stat'
-          ? 'Stat-heavy: wOBA + role-based slot scoring, then refined to maximize expected runs (lineup sim). Talents and slot-locks ignored. ▲ moved up · ▼ moved down from current slot.'
+          ? 'Stat-heavy: wOBA + role-based slot scoring, refined by an exact expected-runs model (chain talents like Rally Time still shape the run model; slot-affinity talents and locks ignored). ▲ moved up · ▼ moved down from current slot.'
           : 'Talent-heavy: slot-affinity talents + locks drive placement; wOBA only overrides on a clear gap. ▲ moved up · ▼ moved down from current slot.')
+        + (vsHand ? ` Ordered vs ${vsHand}HP using replay platoon splits.` : '')
         + (displayOrder.expectedRuns != null ? ` ~${displayOrder.expectedRuns} expected runs/game.` : '')
       }
       headerAction={
-        <div className="flex rounded border border-slate-700 text-xs">
-          {(['stat', 'talent'] as const).map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setMode(m)}
-              title={m === 'stat' ? 'Talents are tiebreakers on top of stats' : 'Weight talents heavily so they drive slot placement'}
-              className={
-                'px-2 py-0.5 transition-colors first:rounded-l last:rounded-r ' +
-                (mode === m ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-200')
-              }
-            >
-              {m === 'stat' ? 'Stat-heavy' : 'Talent-heavy'}
-            </button>
-          ))}
+        <div className="flex items-center gap-2">
+          <select
+            value={vsHand}
+            onChange={(e) => setVsHand(e.target.value as '' | 'L' | 'R')}
+            title="Order the lineup for a specific opposing pitcher hand using measured replay platoon splits (Challenge prep). Needs synced replays."
+            className="rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-xs text-slate-300"
+          >
+            <option value="">Any pitcher</option>
+            <option value="R">vs RHP</option>
+            <option value="L">vs LHP</option>
+          </select>
+          <div className="flex rounded border border-slate-700 text-xs">
+            {(['stat', 'talent'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMode(m)}
+                title={m === 'stat' ? 'Slot-affinity talents ignored; chain talents still count in the run model' : 'Weight talents heavily so they drive slot placement'}
+                className={
+                  'px-2 py-0.5 transition-colors first:rounded-l last:rounded-r ' +
+                  (mode === m ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-200')
+                }
+              >
+                {m === 'stat' ? 'Stat-heavy' : 'Talent-heavy'}
+              </button>
+            ))}
+          </div>
         </div>
       }
     >
@@ -562,7 +596,10 @@ export function OptimalBattingOrder({ team, metaStore }: Props) {
             <tbody>
               {displayOrder.recommended.map((slot) => {
                 const ops = slot.player.batting?.ops;
-                const talents = getSlotTalents(slot.player.uuid, metaStore, slot.role);
+                // Synergy chips only in talent mode — in stat mode slot-affinity
+                // talents have zero influence on placement, so showing them
+                // implied a connection that doesn't exist.
+                const talents = mode === 'talent' ? getSlotTalents(slot.player.uuid, metaStore, slot.role) : [];
                 return (
                   <tr key={`${slot.slot}-${slot.player.name}`} className="border-b border-slate-800/60 last:border-0">
                     <td className="px-2 py-1.5 text-right font-mono text-slate-500">{slot.slot}</td>
