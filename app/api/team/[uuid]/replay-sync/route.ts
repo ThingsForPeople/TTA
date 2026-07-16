@@ -8,7 +8,9 @@ const GAMES_PAGE = 'https://www.tiny-teams.com/api/team-search/teams';
 const REPLAY_BASE = 'https://www.tiny-teams.com/api/replay';
 const SYNC_LIMIT = 100; // only sync the most-recent N games (recency matters most)
 const RETENTION_GAMES = 100; // rolling DB window — prune metrics/syncs beyond this
-const MAX_PAGES = Math.ceil(SYNC_LIMIT / 10) + 2; // enough pages to reach SYNC_LIMIT
+// Enough pages to fill SYNC_LIMIT even when a large share of the recent log is
+// gauntlet games (skipped during enumeration — some teams run ~50% gauntlet).
+const MAX_PAGES = Math.ceil(SYNC_LIMIT / 10) * 2 + 2;
 const MAX_BATCH = 3; // games processed per POST (timeout-safe + gentle on upstream)
 const INTER_FETCH_MS = 900; // spacing between replay fetches within a batch
 
@@ -86,6 +88,10 @@ async function enumerateGames(uuid: string): Promise<{ games: GameRow[]; upstrea
     if (!res || !res.ok) { upstreamError = true; break; } // keep what we have; flag the blip
     const json: any = await res.json();
     for (const g of json.results ?? []) {
+      // Never sync gauntlet games: non-representative roster + inflated
+      // scoring, and they'd eat the recency window (the query route already
+      // excludes any previously-synced gauntlet rows).
+      if (g.game_mode === 'gauntlet') continue;
       games.push({
         gameId: g.game_id,
         completedAt: g.completed_at ?? null,

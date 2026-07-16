@@ -109,7 +109,9 @@ export function Matchups({ teamUuid, seedGames = [] }: { teamUuid: string; seedG
       const res = await fetch(`/api/team/${teamUuid}/games?fresh=1`, { cache: 'no-store' });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
-      const rows = (json.games ?? []) as GameRow[];
+      // Gauntlet games are excluded app-wide (inflated, non-representative) —
+      // they'd otherwise dominate opponent lists and head-to-head records.
+      const rows = ((json.games ?? []) as GameRow[]).filter((g) => g.gameMode !== 'gauntlet');
       gamesCache.set(teamUuid, { games: rows, ts: Date.now() });
       setGames(rows);
     } catch (err) {
