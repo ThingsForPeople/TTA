@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { memo, useMemo, useState, useEffect, useRef } from 'react';
 import {
   ARCHETYPES,
   clearInjury,
@@ -48,6 +48,10 @@ interface Props {
   // "latest changes" table only update on a full page refresh.
   onHistoryChange?: () => void;
 }
+
+// Stable empty-meta instance for untracked players — a fresh emptyMeta() per
+// render would defeat PlayerRow's memo for every untracked row.
+const EMPTY_META = emptyMeta();
 
 // Order-insensitive signature of a player's talent bundle, so "detect" only
 // rewrites players whose talents actually changed (avoids churn / API writes).
@@ -105,16 +109,64 @@ export function RosterEditor({ team, teamUuid, metaStore, onChange, onHistoryCha
     }
   };
 
+  // Latest-value refs so the per-row handlers below can stay REFERENTIALLY
+  // STABLE across renders — that's what lets memo(PlayerRow) actually skip
+  // re-rendering the 13 rows you aren't editing on every commit.
+  const storeRef = useRef(metaStore);
+  storeRef.current = metaStore;
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const onHistoryRef = useRef(onHistoryChange);
+  onHistoryRef.current = onHistoryChange;
+
   const updatePlayer = (uuid: string, updater: (m: PlayerMeta) => PlayerMeta) => {
-    const current = metaStore[uuid] ?? emptyMeta();
-    const next = { ...metaStore, [uuid]: updater(current) };
-    onChange(next);
+    const current = storeRef.current[uuid] ?? emptyMeta();
+    const next = { ...storeRef.current, [uuid]: updater(current) };
+    // Advance the ref immediately: a commit handler that reads the store right
+    // after an update (e.g. onSimBlur snapshotting the just-typed stats) must
+    // see the new value, not the not-yet-re-rendered prop.
+    storeRef.current = next;
+    onChangeRef.current(next);
   };
 
   const clearAll = () => {
     if (!confirm('Clear all sim stats and talents? This cannot be undone.')) return;
     onChange({});
   };
+
+  // One stable handler bundle per player (reads live state through the refs
+  // above), so PlayerRow's memo isn't defeated by fresh closures every render.
+  type RowHandlers = Pick<RowProps,
+    'onSimChange' | 'onSimBlur' | 'onTalentsChange' | 'onTalentLevelChange' | 'onPitchTalentsChange' |
+    'onHandednessChange' | 'onArchetypeChange' | 'onAgeChange' | 'onInjuryChange' | 'onEditHistory'>;
+  const rowHandlers = useMemo(() => {
+    const map = new Map<string, RowHandlers>();
+    for (const p of team.players) {
+      const uuid = p.uuid;
+      if (!uuid) continue;
+      map.set(uuid, {
+        onSimChange: (key, value) => updatePlayer(uuid, (m) => ({ ...m, sim: { ...m.sim, [key]: value } })),
+        onSimBlur: () => {
+          const sim = (storeRef.current[uuid] ?? emptyMeta()).sim;
+          recordSnapshot(uuid, sim);
+          onHistoryRef.current?.();
+        },
+        onTalentsChange: (talents) => updatePlayer(uuid, (m) => ({ ...m, talents })),
+        onTalentLevelChange: (talent, level) =>
+          updatePlayer(uuid, (m) => ({ ...m, talentLevels: { ...m.talentLevels, [talent]: level } })),
+        onPitchTalentsChange: (pitchTalents) => updatePlayer(uuid, (m) => ({ ...m, pitchTalents })),
+        onHandednessChange: (bats, throws_) => updatePlayer(uuid, (m) => ({ ...m, bats, throws: throws_ })),
+        onArchetypeChange: (archetype) => updatePlayer(uuid, (m) => ({ ...m, archetype })),
+        onAgeChange: (age) => updatePlayer(uuid, (m) => ({ ...m, age })),
+        onInjuryChange: (severity, note) =>
+          updatePlayer(uuid, (m) => (severity ? setInjury(m, severity, note) : clearInjury(m))),
+        onEditHistory: () => setEditingHistory(uuid),
+      });
+    }
+    return map;
+    // updatePlayer/storeRef only touch refs — safe to close over the first instance.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [team.players]);
 
   const players = [...team.players].sort((a, b) => {
     const ax = a.bench ? 1 : 0;
@@ -161,47 +213,9 @@ export function RosterEditor({ team, teamUuid, metaStore, onChange, onHistoryCha
             <PlayerRow
               key={player.uuid}
               player={player}
-              meta={meta ?? emptyMeta()}
+              meta={meta ?? EMPTY_META}
               hasData={!!meta && hasSim(meta)}
-              onSimChange={(key, value) => {
-                updatePlayer(player.uuid!, (m) => ({
-                  ...m,
-                  sim: { ...m.sim, [key]: value },
-                }));
-              }}
-              onSimBlur={() => {
-                const uuid = player.uuid!;
-                const sim = (metaStore[uuid] ?? emptyMeta()).sim;
-                recordSnapshot(uuid, sim);
-                onHistoryChange?.();
-              }}
-              onTalentsChange={(talents) =>
-                updatePlayer(player.uuid!, (m) => ({ ...m, talents }))
-              }
-              onTalentLevelChange={(talent, level) =>
-                updatePlayer(player.uuid!, (m) => ({
-                  ...m,
-                  talentLevels: { ...m.talentLevels, [talent]: level },
-                }))
-              }
-              onPitchTalentsChange={(pitchTalents) =>
-                updatePlayer(player.uuid!, (m) => ({ ...m, pitchTalents }))
-              }
-              onHandednessChange={(bats, throws_) =>
-                updatePlayer(player.uuid!, (m) => ({ ...m, bats, throws: throws_ }))
-              }
-              onArchetypeChange={(archetype) =>
-                updatePlayer(player.uuid!, (m) => ({ ...m, archetype }))
-              }
-              onAgeChange={(age) =>
-                updatePlayer(player.uuid!, (m) => ({ ...m, age }))
-              }
-              onInjuryChange={(severity, note) => {
-                updatePlayer(player.uuid!, (m) =>
-                  severity ? setInjury(m, severity, note) : clearInjury(m),
-                );
-              }}
-              onEditHistory={() => setEditingHistory(player.uuid!)}
+              {...rowHandlers.get(player.uuid!)!}
             />
           );
         })}
@@ -274,7 +288,9 @@ interface RowProps {
   onEditHistory: () => void;
 }
 
-function PlayerRow({
+// Memoized: with the stable per-row handlers above, a stat commit re-renders
+// only the edited row instead of the whole roster (talent pickers included).
+const PlayerRow = memo(function PlayerRow({
   player,
   meta,
   hasData,
@@ -425,9 +441,18 @@ function PlayerRow({
               <input
                 type="text"
                 placeholder="injury note..."
-                value={injury.note ?? ''}
+                // Commit on blur — per-keystroke commits meant a store update
+                // AND an API write for every character typed.
+                key={injury.note ?? ''}
+                defaultValue={injury.note ?? ''}
                 onClick={(e) => e.stopPropagation()}
-                onChange={(e) => onInjuryChange(injury.severity, e.target.value || undefined)}
+                onBlur={(e) => {
+                  const note = e.target.value || undefined;
+                  if (note !== injury.note) onInjuryChange(injury.severity, note);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                }}
                 className="ml-1 rounded border border-slate-700 bg-slate-950 px-2 py-0.5 text-[11px] text-slate-300 placeholder:text-slate-600 focus:border-slate-500 focus:outline-none w-32"
               />
             )}
@@ -489,12 +514,20 @@ function PlayerRow({
                 type="number"
                 min={16}
                 max={45}
-                value={meta.age ?? ''}
+                // Uncontrolled + commit-on-blur: committing per keystroke made
+                // typing "25" trigger two full store updates (and the deferred
+                // optimizer recomputes behind them).
+                key={meta.age ?? 'unset'}
+                defaultValue={meta.age ?? ''}
                 placeholder="—"
                 title="Not in the game feed — enter manually. Powers retirement/succession advice (players retire ~30)."
-                onChange={(e) => {
+                onBlur={(e) => {
                   const v = e.target.value.trim();
-                  onAgeChange(v === '' ? undefined : Math.max(0, Math.round(Number(v))) || undefined);
+                  const age = v === '' ? undefined : Math.max(0, Math.round(Number(v))) || undefined;
+                  if (age !== meta.age) onAgeChange(age);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
                 }}
                 className="w-14 rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[11px] text-slate-300 placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none"
               />
@@ -563,7 +596,7 @@ function PlayerRow({
       )}
     </div>
   );
-}
+});
 
 function SimStatInput({ value, onCommit }: { value: number; onCommit: (v: number) => void }) {
   const [draft, setDraft] = useState(String(value));
