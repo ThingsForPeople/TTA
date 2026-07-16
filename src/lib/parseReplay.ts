@@ -721,10 +721,15 @@ export interface PlayerGameMetrics {
   // the input handedness talents and start/sit calls want.
   paVsL: number; abVsL: number; hitsVsL: number; kVsL: number;
   paVsR: number; abVsR: number; hitsVsR: number; kVsR: number;
-  // Query-time transients (never stored): range-aware expected/actual outs from
-  // the combined engaged+unreached fit — see applyRangeCurve in the metrics route.
+  // Query-time transients (never stored): range-aware expected/actual outs and
+  // skill-leverage (Σ P(1−P) over engaged + unreached records) from the
+  // combined engaged+unreached fit — see applyRangeCurve in the metrics route.
+  // rangeLeverageSum is what position importance uses when present: post-patch,
+  // engaged chances convert ~100% (leverage ≈ 0), so the in-doubt band — and
+  // the real positional skill-leverage — lives on the unreached balls.
   rangeXOuts?: number;
   rangeEngagedOuts?: number;
+  rangeLeverageSum?: number;
   // Raw per-engaged-chance records: distance covered (`d`) + whether it was an
   // out (`o`), plus the integer field coordinates of the engagement (`x`,`y`,
   // quantized — origin = home plate, +x = RF side, −y = deeper). `d`/`o` let the
@@ -826,9 +831,14 @@ export function expectedOut(distance: number, position: number | null): number {
   return 1 / (1 + Math.exp(c.a * (distance - c.d50)));
 }
 
-// Each steal attempt against the catcher is an in-doubt play (catcher arm/skill
-// swings the out), so it contributes a fixed leverage like a coin-flip chance.
-export const STEAL_LEVERAGE = 0.22;
+// Leverage credited to the catcher per opponent steal attempt. The raw
+// per-attempt out-variance is ~0.23 (pooled CS% ≈ 37%), but leverage is meant
+// to measure SKILL sensitivity and CS% barely tracks catcher attributes
+// (2026-07-16 audit: 987 catcher-games, ~0.5 att/g, attribute↔CS% correlation
+// weak and sign-unstable) — the outcome is mostly runner speed and dice. So
+// only the catcher-controllable share (~25%) counts here; the old 0.22 also
+// inflated C importance after the July patch collapsed all fitted leverage.
+export const STEAL_LEVERAGE = 0.06;
 
 export interface GameMetrics {
   ourSide: 'home' | 'away';

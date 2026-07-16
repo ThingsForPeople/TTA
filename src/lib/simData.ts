@@ -1,5 +1,5 @@
 export const POSITION_GUIDANCE: Record<string, string> = {
-  C: 'ARM primary (steal prevention). FLD for blocking and exchange speed. SPD less critical.',
+  C: 'Bat-first spot. Steal defense is the only measured skill and it only weakly tracks ARM (~0.5 attempts/game); blocking/framing are unmeasured. Real C value: hitting + battery talents / Pop Time.',
   SS: 'SPD + FLD equal (range dominates in sim). ARM for long throw from the hole to 1B.',
   CF: 'SPD primary (most ground to cover). FLD for tracking, ARM for throws to home/3B.',
   '2B': 'FLD + SPD (DP pivot, range up the middle). Some ARM value — not zero.',

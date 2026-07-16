@@ -34,6 +34,10 @@ export interface FieldingGrade {
   runMargin: number | null;
   jumpGreat: number;
   jumpTotal: number;
+  // Caught-stealing above the team-mean rate, per game caught (2026-07-16
+  // audit): the one measured catcher skill, previously invisible to the
+  // optimizer. null below MIN_STEAL_ATT attempts.
+  csAboveMeanPerGame: number | null;
 }
 
 export type FieldingGrades = Record<string, FieldingGrade>;
@@ -51,6 +55,10 @@ function primarySplit(p: AggregatedPlayer) {
 // position-shaped, so raw throw speed stays dominant.
 const ARM_MARGIN_WEIGHT = 0.3;
 
+// Minimum steal attempts against before a catcher's CS rate is trusted
+// (matches the Advanced Stats panel's CatcherCompare gate).
+const MIN_STEAL_ATT = 5;
+
 export function buildFieldingGrades(players: AggregatedPlayer[]): FieldingGrades {
   // Arm evidence combines primary-position throw speed with the close-play
   // margin (both z-scored over the team, then blended).
@@ -66,6 +74,11 @@ export function buildFieldingGrades(players: AggregatedPlayer[]): FieldingGrades
   const mMean = margins.length ? margins.reduce((s, v) => s + v, 0) / margins.length : 0;
   const mVar = margins.length ? margins.reduce((s, v) => s + (v - mMean) ** 2, 0) / margins.length : 0;
   const mStd = Math.sqrt(mVar) || 1;
+
+  // Team-mean CS rate, the baseline a catcher's steal defense is judged against.
+  const totAtt = players.reduce((s, p) => s + (p.stealAttempts ?? 0), 0);
+  const totCs = players.reduce((s, p) => s + (p.caughtStealing ?? 0), 0);
+  const teamCsRate = totAtt > 0 ? totCs / totAtt : 0;
 
   const grades: FieldingGrades = {};
   for (const p of players) {
@@ -101,6 +114,13 @@ export function buildFieldingGrades(players: AggregatedPlayer[]): FieldingGrades
       runMargin: p.runMarginN >= 5 ? p.runMargin : null,
       jumpGreat: p.jumpGreat,
       jumpTotal: p.jumpTotal,
+      csAboveMeanPerGame: (() => {
+        if ((p.stealAttempts ?? 0) < MIN_STEAL_ATT) return null;
+        // Steal attempts only accrue while catching, so rate over C-split games.
+        const cGames = p.byPosition?.find((s) => s.position === 2)?.games ?? (p.position === 2 ? p.games : 0);
+        if (!cGames) return null;
+        return (p.caughtStealing - teamCsRate * p.stealAttempts) / cGames;
+      })(),
     };
   }
   return grades;
@@ -121,6 +141,10 @@ const BASES_SAVED_SCALE = 18; // ~0.3 bases-saved/game → ~5 pts
 const BASES_SAVED_CAP = 12;
 // Exchange term: small — the log can't fully separate hands from luck.
 const EXCHANGE_CAP = 3;
+// Catcher steal defense: ~0.5 runs per CS (RE24 swing) at ~0.5 att/game keeps
+// this small by construction; a +10pp CS% catcher earns ~1.5 pts.
+const CS_SCALE = 30;
+const CS_CAP = 8;
 
 export function empiricalFieldingBonus(
   position: string,
@@ -151,6 +175,12 @@ export function empiricalFieldingBonus(
     // player, so apply wherever an anchor exists.
     const exch = (g.releaseGreatRate != null ? (g.releaseGreatRate - 0.5) * 4 : 0) - g.bobblesPerGame * 6;
     bonus += clamp(exch, -EXCHANGE_CAP, EXCHANGE_CAP) * conf;
+    // Catcher: the one measured C skill is steal defense — the batted-ball
+    // anchor above is ≈0 there by construction (no chances), so credit CS
+    // above the team mean instead. A proven steal-stopper keeps his job.
+    if (position === 'C' && g.csAboveMeanPerGame != null) {
+      bonus += clamp(g.csAboveMeanPerGame * CS_SCALE, -CS_CAP, CS_CAP) * conf;
+    }
   }
   // Transferable arm: a measured strong/weak arm matters most where arm matters.
   // (armZ blends throw speed with the close-play margin outcome signal.) Gated

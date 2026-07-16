@@ -6,6 +6,7 @@ import type { AggregatedPlayer, PositionImportance, PlayerPositionSplit } from '
 import { DEFAULT_POSITION_IMPORTANCE, DEFAULT_STAT_WEIGHTS, type StatWeights } from '../lib/rosterOptimizer';
 import { maxAssignment } from '../lib/assign';
 import { OUT_OF_ZONE_CELL, zoneCellsForDirection } from '../lib/talentEffects';
+import { currentSeasonStart } from '../lib/api';
 import { talentMagnitudeAtTier } from '../lib/talentIndex';
 
 interface Props {
@@ -640,6 +641,7 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<View>('fielding');
   const [mode, setMode] = useState('');
+  const [thisSeason, setThisSeason] = useState(false);
   const [lastN, setLastN] = useState(50);
   const [sortKey, setSortKey] = useState('pae');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -653,6 +655,7 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
     setLoading(true);
     const qs = new URLSearchParams();
     if (mode) qs.set('mode', mode);
+    if (thisSeason) qs.set('since', currentSeasonStart().toISOString());
     if (lastN) qs.set('games', String(lastN));
     try {
       const res = await fetch(`/api/team/${teamUuid}/replay-metrics?${qs}`);
@@ -675,7 +678,7 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [teamUuid, mode, lastN]);
+  }, [teamUuid, mode, thisSeason, lastN]);
 
   useEffect(() => { loadMetrics(); }, [loadMetrics]);
 
@@ -882,6 +885,18 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
               <option value="challenge">Challenge</option>
               <option value="gauntlet">Gauntlet</option>
             </select>
+            <label
+              className="flex items-center gap-1 text-slate-400"
+              title="Only games since the current season started (Wednesday 12 AM ET). Combine with the Season mode to isolate this season's games."
+            >
+              <input
+                type="checkbox"
+                checked={thisSeason}
+                onChange={(e) => setThisSeason(e.target.checked)}
+                className="accent-emerald-500"
+              />
+              this season
+            </label>
             <label className="flex items-center gap-1 text-slate-400">
               Last
               <select

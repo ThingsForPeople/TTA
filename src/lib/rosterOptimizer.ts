@@ -90,11 +90,14 @@ const PITCHER_CATCHER_TALENTS = [
 // where a good glove vs a bad one swings the out — while infield grounders
 // convert ~95–100% regardless of range, so IF leverage is low and lives only
 // in the long tail. Hence CF/LF/RF > SS≈2B/3B > 1B, the OPPOSITE of the
-// traditional MLB SS-premium hierarchy this used to encode. Catcher's only
-// leverage is caught-stealing, so it's floored near average; 1B is the
-// receiver/bat-dump spot (scoops throws, makes few range plays) → lowest.
-// Normalized to mean 1.0; magnitudes kept moderate (the 0.4 workload term in
-// the real blend tempers the spread, and this is just a prior).
+// traditional MLB SS-premium hierarchy this used to encode. Catcher joins 1B
+// at the bottom (2026-07-16 audit): its only leverage is steal defense, which
+// is low-volume (~0.5 att/g) and barely catcher-controllable (CS% ↔ attributes
+// weak/sign-unstable), and no framing/blocking events exist in the log — a
+// +10pp CS% catcher saves ~0.5 runs per 18-game season. Real C value is the
+// bat plus battery talents / Pop Time, scored separately. ~Mean 1.0;
+// magnitudes kept moderate (the 0.4 workload term in the real blend tempers
+// the spread, and this is just a prior).
 export const DEFAULT_POSITION_IMPORTANCE: Record<string, number> = {
   CF:  1.22, // deepest range, most in-doubt fly balls → highest leverage
   LF:  1.10,
@@ -102,8 +105,8 @@ export const DEFAULT_POSITION_IMPORTANCE: Record<string, number> = {
   SS:  1.02, // most-leveraged IF spot (throw from the hole + DP), but well below OF
   '2B': 0.98,
   '3B': 0.95, // hot corner, but high conversion → lowest-leverage dirt spot
-  C:   0.93, // floored near average — its leverage is steal defense, not batted balls
-  '1B': 0.70, // lowest by a clear margin — receiver/bat-dump; workload over-credits it
+  C:   0.70, // bat-first — steal defense is tiny and mostly luck; talents carry real C value
+  '1B': 0.70, // receiver/bat-dump; workload over-credits it
 };
 
 // ── Fielding talent bonus system ─────────────────────────────────────

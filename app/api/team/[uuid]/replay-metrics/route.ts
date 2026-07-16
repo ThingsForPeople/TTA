@@ -3,16 +3,18 @@ import { and, eq, gte, sql } from 'drizzle-orm';
 import { db, hasDb } from '@/db';
 import { replayMetrics } from '@/db/schema';
 import type { PlayerGameMetrics, AggregatedPlayer, PositionImportance, PlayerPositionSplit } from '@/lib/parseReplay';
-import { fitOutCurve, curveOut, expectedOut } from '@/lib/parseReplay';
+import { fitOutCurve, curveOut, expectedOut, STEAL_LEVERAGE } from '@/lib/parseReplay';
 import { POS_NUM_TO_STR } from '@/lib/fieldingGrades';
 import { DEFAULT_POSITION_IMPORTANCE, DEFAULT_STAT_WEIGHTS, type StatWeights } from '@/lib/rosterOptimizer';
 
 const FIELD_POS_STR = ['C', '1B', '2B', 'SS', '3B', 'LF', 'CF', 'RF'];
 
 // How much the recommended importance leans on skill-leverage vs raw workload.
-// Pure leverage is noisy at small samples and structurally undercounts high-
-// range positions (we only score balls a fielder engaged, not balls a rangy
-// fielder could have reached); blending with xOuts (workload) damps both.
+// Leverage is range-aware where possible (rangeLeverageSum: P(1−P) over
+// engaged + unreached records — post-patch, engaged chances convert ~100%, so
+// the in-doubt band lives on unreached balls), which fixed the old structural
+// undercount of high-range positions. Blending with xOuts (workload) still
+// damps small-sample fit noise.
 const LEVERAGE_BLEND = 0.6;
 
 // How much the derived per-position weights trust the replay data vs the
@@ -34,7 +36,10 @@ function buildPositionImportance(rows: { position: number | null; metrics: Playe
     (acc[ps] ??= { ch: 0, xo: 0, lev: 0, games: 0 });
     acc[ps].ch += r.metrics.chances ?? 0;
     acc[ps].xo += r.metrics.expectedOuts ?? 0;
-    acc[ps].lev += r.metrics.leverageSum ?? 0;
+    // Range-aware leverage when the row has batted-ball records (see
+    // applyRangeCurve); fallback covers pre-backfill rows and the catcher,
+    // whose leverage is steal-based (no batted balls).
+    acc[ps].lev += r.metrics.rangeLeverageSum ?? r.metrics.leverageSum ?? 0;
     acc[ps].games++; // one row = one fielder-game manned here
   }
   const present = FIELD_POS_STR.filter((p) => acc[p]);
@@ -65,13 +70,16 @@ function buildPositionImportance(rows: { position: number | null; metrics: Playe
   return present
     .map((p, i) => {
       // Floor/cap two structurally-misread spots AFTER normalizing.
-      //  • Catcher floored UP: its only leverage signal is caught-stealing, which
-      //    under-counts real C value.
+      //  • Catcher floored UP to its (deliberately low) default: with zero
+      //    batted-ball chances its blend structurally reads near 0, but the
+      //    floor is only there for that structural gap — NOT to prop C to
+      //    average (2026-07-16 audit: steal-only leverage supports well below
+      //    average; C is bat-first).
       //  • 1B capped DOWN: workload over-credits it (routine grounders, and it's
       //    the end-point of many putouts), so the data props it above where it
       //    belongs (it's the lowest-leverage spot — the bat-dump position).
       let rec = r2(blended[i] / mBlend);
-      if (p === 'C') rec = Math.max(rec, DEFAULT_POSITION_IMPORTANCE['C'] ?? 0.95);
+      if (p === 'C') rec = Math.max(rec, DEFAULT_POSITION_IMPORTANCE['C'] ?? 0.70);
       if (p === '1B') rec = Math.min(rec, DEFAULT_POSITION_IMPORTANCE['1B'] ?? 0.70);
       return {
         position: p,
@@ -392,10 +400,10 @@ function applyRangeCurve(rows: { position: number | null; metrics: PlayerGameMet
     if (ed.length === 0 && ud.length === 0) continue;
     const c = r.position != null ? curves.get(r.position) : undefined;
     const P = (d: number) => (c ? curveOut(c, d) : expectedOut(d, r.position));
-    let xo = 0, outs = 0;
-    for (const { d, o } of ed) { xo += P(d); if (o) outs++; }
-    for (const { d } of ud) xo += P(d);
-    r.metrics = { ...r.metrics, rangeXOuts: xo, rangeEngagedOuts: outs };
+    let xo = 0, outs = 0, lev = 0;
+    for (const { d, o } of ed) { const p = P(d); xo += p; lev += p * (1 - p); if (o) outs++; }
+    for (const { d } of ud) { const p = P(d); xo += p; lev += p * (1 - p); }
+    r.metrics = { ...r.metrics, rangeXOuts: xo, rangeEngagedOuts: outs, rangeLeverageSum: lev };
     touched.push({ r, n: ed.length + ud.length });
   }
   // Re-center per position: a boundary/degenerate logistic fit (or the static
@@ -548,7 +556,8 @@ const NUMERIC_KEYS: (keyof PlayerGameMetrics)[] = [
 ];
 
 // GET — aggregated advanced stats across stored replay metrics.
-// Filters: ?days=N (completed within last N days), ?mode=season|quick_play|challenge, ?games=N (last N games).
+// Filters: ?days=N (completed within last N days), ?since=ISO (completed on/after — e.g.
+// the current season's Wednesday start), ?mode=season|quick_play|challenge, ?games=N (last N games).
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ uuid: string }> },
@@ -563,8 +572,14 @@ export async function GET(
   const mode = searchParams.get('mode') || '';
   const lastN = Number(searchParams.get('games')) || 0;
 
+  const sinceParam = searchParams.get('since');
+
   const conds = [eq(replayMetrics.userId, userId), eq(replayMetrics.teamUuid, uuid)];
   if (days > 0) conds.push(gte(replayMetrics.completedAt, new Date(Date.now() - days * 86_400_000)));
+  if (sinceParam) {
+    const since = new Date(sinceParam);
+    if (!Number.isNaN(since.getTime())) conds.push(gte(replayMetrics.completedAt, since));
+  }
   // A specific mode isolates that mode (incl. gauntlet); the default "All" view
   // EXCLUDES gauntlet so its non-representative roster doesn't pollute aggregate
   // stats/importance. `is distinct from` keeps null-mode rows (pre-mode syncs).
@@ -598,6 +613,13 @@ export async function GET(
   // tracks what's on screen. Rows without raw chance data (pre-`engageDists`)
   // keep their stored, static-curve values.
   applyDynamicCurve(filtered);
+  // Catcher leverage is a stored constant × steal attempts, so recompute it
+  // from the attempt counts at query time — a STEAL_LEVERAGE recalibration
+  // then applies to already-synced rows without a re-sync. (Catchers field no
+  // batted balls, so their leverage is entirely steal-based.)
+  for (const r of filtered) {
+    if (r.position === 2) r.metrics = { ...r.metrics, leverageSum: (r.metrics.stealAttempts ?? 0) * STEAL_LEVERAGE };
+  }
   // Strip the shared per-game fielding-difficulty component from PAE so a
   // backup whose reps cluster in tougher games isn't penalized for context.
   applyGameContext(filtered);
