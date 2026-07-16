@@ -3,7 +3,7 @@ import { and, eq, gte, sql } from 'drizzle-orm';
 import { db, hasDb } from '@/db';
 import { replayMetrics } from '@/db/schema';
 import type { PlayerGameMetrics, AggregatedPlayer, PositionImportance, PlayerPositionSplit } from '@/lib/parseReplay';
-import { fitOutCurve, curveOut, expectedOut } from '@/lib/parseReplay';
+import { fitOutCurve, curveOut, expectedOut, STEAL_LEVERAGE } from '@/lib/parseReplay';
 import { POS_NUM_TO_STR } from '@/lib/fieldingGrades';
 import { DEFAULT_POSITION_IMPORTANCE, DEFAULT_STAT_WEIGHTS, type StatWeights } from '@/lib/rosterOptimizer';
 
@@ -65,13 +65,16 @@ function buildPositionImportance(rows: { position: number | null; metrics: Playe
   return present
     .map((p, i) => {
       // Floor/cap two structurally-misread spots AFTER normalizing.
-      //  • Catcher floored UP: its only leverage signal is caught-stealing, which
-      //    under-counts real C value.
+      //  • Catcher floored UP to its (deliberately low) default: with zero
+      //    batted-ball chances its blend structurally reads near 0, but the
+      //    floor is only there for that structural gap — NOT to prop C to
+      //    average (2026-07-16 audit: steal-only leverage supports well below
+      //    average; C is bat-first).
       //  • 1B capped DOWN: workload over-credits it (routine grounders, and it's
       //    the end-point of many putouts), so the data props it above where it
       //    belongs (it's the lowest-leverage spot — the bat-dump position).
       let rec = r2(blended[i] / mBlend);
-      if (p === 'C') rec = Math.max(rec, DEFAULT_POSITION_IMPORTANCE['C'] ?? 0.95);
+      if (p === 'C') rec = Math.max(rec, DEFAULT_POSITION_IMPORTANCE['C'] ?? 0.70);
       if (p === '1B') rec = Math.min(rec, DEFAULT_POSITION_IMPORTANCE['1B'] ?? 0.70);
       return {
         position: p,
@@ -605,6 +608,13 @@ export async function GET(
   // tracks what's on screen. Rows without raw chance data (pre-`engageDists`)
   // keep their stored, static-curve values.
   applyDynamicCurve(filtered);
+  // Catcher leverage is a stored constant × steal attempts, so recompute it
+  // from the attempt counts at query time — a STEAL_LEVERAGE recalibration
+  // then applies to already-synced rows without a re-sync. (Catchers field no
+  // batted balls, so their leverage is entirely steal-based.)
+  for (const r of filtered) {
+    if (r.position === 2) r.metrics = { ...r.metrics, leverageSum: (r.metrics.stealAttempts ?? 0) * STEAL_LEVERAGE };
+  }
   // Strip the shared per-game fielding-difficulty component from PAE so a
   // backup whose reps cluster in tougher games isn't penalized for context.
   applyGameContext(filtered);
