@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useEffect, useCallback } from 'react';
+import { useMemo, useState, useEffect, useCallback, useDeferredValue } from 'react';
 import { CollapsiblePanel } from './CollapsiblePanel';
 import { PositionWeightsEditor } from './PositionWeightsEditor';
 import { POSITION_GUIDANCE } from '../lib/simData';
@@ -39,9 +39,20 @@ function useOptimization(
   battingMode: BattingMode = 'stat',
   platoonDelta?: Record<string, number>,
 ): RosterOptimization {
+  // This is heavy (Hungarian assignment + the exact-run-model 2-opt, several
+  // hundred ms). Defer the inputs so a roster-editor commit paints its own
+  // render immediately and the optimizer re-runs at transition priority
+  // afterward — without this, every stat-input blur froze the UI while BOTH
+  // mounted optimizers (batting order + field positions) recomputed inline.
+  const dTeam = useDeferredValue(team);
+  const dMeta = useDeferredValue(metaStore);
+  const dImportance = useDeferredValue(positionImportance);
+  const dStatWeights = useDeferredValue(statWeights);
+  const dGrades = useDeferredValue(fieldingGrades);
+  const dPlatoon = useDeferredValue(platoonDelta);
   return useMemo(
-    () => optimizeRoster(team, metaStore, positionImportance, statWeights, fieldingGrades, battingMode, platoonDelta),
-    [team, metaStore, positionImportance, statWeights, fieldingGrades, battingMode, platoonDelta],
+    () => optimizeRoster(dTeam, dMeta, dImportance, dStatWeights, dGrades, battingMode, dPlatoon),
+    [dTeam, dMeta, dImportance, dStatWeights, dGrades, battingMode, dPlatoon],
   );
 }
 
@@ -482,7 +493,11 @@ export function FieldPositionsPanel({ team, metaStore, teamUuid, dataVersion = 0
 // with the fielding call-ups above — a bench bat worth +0.2 R/g still has to
 // field a position.
 function BenchOffenseSection({ team, metaStore }: { team: Team; metaStore: PlayerMetaStore }) {
-  const impacts = useMemo(() => benchOffenseImpacts(team, metaStore), [team, metaStore]);
+  // Deferred for the same reason as useOptimization — this runs a full order
+  // build plus one exact-model evaluation per bench bat × slot.
+  const dTeam = useDeferredValue(team);
+  const dMeta = useDeferredValue(metaStore);
+  const impacts = useMemo(() => benchOffenseImpacts(dTeam, dMeta), [dTeam, dMeta]);
   const meaningful = impacts.filter((i) => i.runsDelta > 0.02);
   if (meaningful.length === 0) return null;
   return (
