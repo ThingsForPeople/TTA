@@ -868,6 +868,13 @@ function buildBattingOrder(
     // up blocking every legitimate move while passing dice).
     const MIN_SIM_GAIN = 0.005;
     if (!useLocks) {
+      // Inside the indifference band the ROLE order wins the tiebreak. Without
+      // this, greedy banded 2-opt has hysteresis: a mid-optimization swap can
+      // park the worst bat at #7 (a genuine >band gain at the time, e.g. chain-
+      // trigger feeding), and the reverse swap — worth a within-band ~0.002 —
+      // can never fire, leaving a goofy-looking order the run model is actually
+      // indifferent about. So: accept a swap for a real run gain, OR when runs
+      // stay within the band and the leverage-weighted role fit improves.
       let reImproved = true, reGuard = 0;
       while (reImproved && reGuard++ < 30) {
         reImproved = false;
@@ -875,9 +882,13 @@ function buildBattingOrder(
           for (let j = i + 1; j < filledSlots.length; j++) {
             const si = filledSlots[i], sj = filledSlots[j];
             const pi = assign.get(si)!, pj = assign.get(sj)!;
+            const roleBefore = SLOT_LEVERAGE[si] * slotFit(pi, si, ms, mult, platoonDelta) + SLOT_LEVERAGE[sj] * slotFit(pj, sj, ms, mult, platoonDelta);
+            const roleAfter = SLOT_LEVERAGE[si] * slotFit(pj, si, ms, mult, platoonDelta) + SLOT_LEVERAGE[sj] * slotFit(pi, sj, ms, mult, platoonDelta);
             assign.set(si, pj); assign.set(sj, pi);
             const cand = expectedLineupRuns(orderRates(), orderChains());
-            if (cand > bestRuns + MIN_SIM_GAIN) { bestRuns = cand; reImproved = true; }
+            const runGain = cand > bestRuns + MIN_SIM_GAIN;
+            const roleTiebreak = cand > bestRuns - MIN_SIM_GAIN && roleAfter > roleBefore + 1e-9;
+            if (runGain || roleTiebreak) { bestRuns = cand; reImproved = true; }
             else { assign.set(si, pi); assign.set(sj, pj); } // revert
           }
         }
