@@ -721,10 +721,15 @@ export interface PlayerGameMetrics {
   // the input handedness talents and start/sit calls want.
   paVsL: number; abVsL: number; hitsVsL: number; kVsL: number;
   paVsR: number; abVsR: number; hitsVsR: number; kVsR: number;
-  // Query-time transients (never stored): range-aware expected/actual outs from
-  // the combined engaged+unreached fit — see applyRangeCurve in the metrics route.
+  // Query-time transients (never stored): range-aware expected/actual outs and
+  // skill-leverage (Σ P(1−P) over engaged + unreached records) from the
+  // combined engaged+unreached fit — see applyRangeCurve in the metrics route.
+  // rangeLeverageSum is what position importance uses when present: post-patch,
+  // engaged chances convert ~100% (leverage ≈ 0), so the in-doubt band — and
+  // the real positional skill-leverage — lives on the unreached balls.
   rangeXOuts?: number;
   rangeEngagedOuts?: number;
+  rangeLeverageSum?: number;
   // Raw per-engaged-chance records: distance covered (`d`) + whether it was an
   // out (`o`), plus the integer field coordinates of the engagement (`x`,`y`,
   // quantized — origin = home plate, +x = RF side, −y = deeper). `d`/`o` let the

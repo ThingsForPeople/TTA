@@ -10,9 +10,11 @@ import { DEFAULT_POSITION_IMPORTANCE, DEFAULT_STAT_WEIGHTS, type StatWeights } f
 const FIELD_POS_STR = ['C', '1B', '2B', 'SS', '3B', 'LF', 'CF', 'RF'];
 
 // How much the recommended importance leans on skill-leverage vs raw workload.
-// Pure leverage is noisy at small samples and structurally undercounts high-
-// range positions (we only score balls a fielder engaged, not balls a rangy
-// fielder could have reached); blending with xOuts (workload) damps both.
+// Leverage is range-aware where possible (rangeLeverageSum: P(1−P) over
+// engaged + unreached records — post-patch, engaged chances convert ~100%, so
+// the in-doubt band lives on unreached balls), which fixed the old structural
+// undercount of high-range positions. Blending with xOuts (workload) still
+// damps small-sample fit noise.
 const LEVERAGE_BLEND = 0.6;
 
 // How much the derived per-position weights trust the replay data vs the
@@ -34,7 +36,10 @@ function buildPositionImportance(rows: { position: number | null; metrics: Playe
     (acc[ps] ??= { ch: 0, xo: 0, lev: 0, games: 0 });
     acc[ps].ch += r.metrics.chances ?? 0;
     acc[ps].xo += r.metrics.expectedOuts ?? 0;
-    acc[ps].lev += r.metrics.leverageSum ?? 0;
+    // Range-aware leverage when the row has batted-ball records (see
+    // applyRangeCurve); fallback covers pre-backfill rows and the catcher,
+    // whose leverage is steal-based (no batted balls).
+    acc[ps].lev += r.metrics.rangeLeverageSum ?? r.metrics.leverageSum ?? 0;
     acc[ps].games++; // one row = one fielder-game manned here
   }
   const present = FIELD_POS_STR.filter((p) => acc[p]);
@@ -395,10 +400,10 @@ function applyRangeCurve(rows: { position: number | null; metrics: PlayerGameMet
     if (ed.length === 0 && ud.length === 0) continue;
     const c = r.position != null ? curves.get(r.position) : undefined;
     const P = (d: number) => (c ? curveOut(c, d) : expectedOut(d, r.position));
-    let xo = 0, outs = 0;
-    for (const { d, o } of ed) { xo += P(d); if (o) outs++; }
-    for (const { d } of ud) xo += P(d);
-    r.metrics = { ...r.metrics, rangeXOuts: xo, rangeEngagedOuts: outs };
+    let xo = 0, outs = 0, lev = 0;
+    for (const { d, o } of ed) { const p = P(d); xo += p; lev += p * (1 - p); if (o) outs++; }
+    for (const { d } of ud) { const p = P(d); xo += p; lev += p * (1 - p); }
+    r.metrics = { ...r.metrics, rangeXOuts: xo, rangeEngagedOuts: outs, rangeLeverageSum: lev };
     touched.push({ r, n: ed.length + ud.length });
   }
   // Re-center per position: a boundary/degenerate logistic fit (or the static
