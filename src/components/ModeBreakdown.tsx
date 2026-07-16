@@ -34,11 +34,12 @@ const STAT_OPTIONS: { value: CompareStat; label: string }[] = [
   { value: 'bb', label: 'BB' },
 ];
 
+// No gauntlet row: the upstream silently ignores mode=gauntlet, so the old
+// Gauntlet column was actually showing unfiltered all-mode stats mislabeled.
 const MODES: { key: ModeFilter; label: string; color: string }[] = [
   { key: 'quick_play', label: 'Quickplay', color: '#34d399' },
   { key: 'challenge', label: 'Challenge', color: '#60a5fa' },
   { key: 'season', label: 'Season', color: '#f59e0b' },
-  { key: 'gauntlet', label: 'Gauntlet', color: '#a78bfa' },
 ];
 
 const RATE_STATS = new Set<CompareStat>(['avg', 'obp', 'slg', 'ops']);

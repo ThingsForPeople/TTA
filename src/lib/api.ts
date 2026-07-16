@@ -34,7 +34,11 @@ export type TimeFilter =
   | 'g50'
   | 'g100';
 
-export type ModeFilter = 'all' | 'quick_play' | 'challenge' | 'season' | 'gauntlet';
+// No 'gauntlet': gauntlet games are excluded everywhere by design (inflated,
+// non-representative). 'all' resolves server-side to quick_play+season+challenge
+// merged — the upstream silently ignores mode=gauntlet, so it can't be isolated
+// or excluded via a plain mode param.
+export type ModeFilter = 'all' | 'quick_play' | 'challenge' | 'season';
 
 export const TIME_OPTIONS: { value: TimeFilter; label: string }[] = [
   { value: 'all', label: 'All-time' },
@@ -52,11 +56,10 @@ export const TIME_OPTIONS: { value: TimeFilter; label: string }[] = [
 ];
 
 export const MODE_OPTIONS: { value: ModeFilter; label: string }[] = [
-  { value: 'all', label: 'All modes' },
+  { value: 'all', label: 'All modes (no gauntlet)' },
   { value: 'quick_play', label: 'Quickplay' },
   { value: 'challenge', label: 'Challenge' },
   { value: 'season', label: 'Season' },
-  { value: 'gauntlet', label: 'Gauntlet' },
 ];
 
 const LAST_N_GAMES: Partial<Record<TimeFilter, number>> = {

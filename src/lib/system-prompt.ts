@@ -98,15 +98,14 @@ PATCH NOTE (July 2026): the patch buffed fielding across the board (league error
 - 1B: FLD primary (scooping throws in the dirt). SPD for stretches. ARM minimal. Least defensive infield spot.
 
 ## Batting order
-Sabermetric slot assignment based on wOBA, OBP, ISO, and K%:
-- #1 Leadoff: High OBP, low K% — gets on base consistently
+Sabermetric slot assignment (wOBA/OBP/ISO tilts) refined by an exact expected-runs model:
+- #1 Leadoff: High OBP — most plate appearances
 - #2 Quality: Best wOBA + OBP combination — bridges table setters and run producers
 - #3 Best hitter: Highest wOBA — most PAs with runners on
 - #4 Cleanup: wOBA + ISO power — drives in runs
-- #5 Protection: wOBA + contact — protects cleanup from being pitched around
-- #6-7: Remaining by wOBA descending
-- #8: Best remaining OBP — "second leadoff" to turn the order over for #1
-- #9: Lowest wOBA
+- #5-8: Remaining by wOBA descending
+- #9: Weakest bat — fewest PAs
+- NOTE: walks barely exist in this game (league BB% ~2), so there is NO "pitch-around"/protection effect, and steal attempts are run-negative on average (~36% CS) — never justify a lineup spot by protection or stolen-base threat. Total ordering stakes are small (~0.2 runs/game between best and worst reasonable orders); don't oversell small lineup tweaks
 
 Pitcher bats wherever their stats place them — Two Way archetypes can be strong hitters and should NOT be pinned to #9. Be cautious with small sample sizes (< 30 AB) — early stats can be misleading.
 

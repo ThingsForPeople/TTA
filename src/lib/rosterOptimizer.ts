@@ -369,6 +369,7 @@ export function optimizeRoster(
   statWeights?: StatWeights,
   fieldingGrades?: FieldingGrades,
   battingMode: BattingMode = 'stat',
+  platoonDelta?: Record<string, number>,
 ): RosterOptimization {
   const warnings: string[] = [];
   // How much each position values arm strength (drives the transferable arm
@@ -616,7 +617,7 @@ export function optimizeRoster(
     players: [...virtualPlayers, ...benchPlayers.map((b) => ({ ...b, bench: true }))],
     pitcher,
   };
-  const battingOrder = recommendBattingOrder(virtualTeam, metaStore, battingMode, fieldingGrades);
+  const battingOrder = recommendBattingOrder(virtualTeam, metaStore, battingMode, platoonDelta);
 
   return { assignments, options, currentTotalScore, bench: benchAssignments, benchUpgrades, battingOrder, warnings };
 }

@@ -174,12 +174,10 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!teamData) return;
-    if (time === 'all' && mode === 'all') {
-      setFilteredPlayers(undefined);
-      setFilterError(undefined);
-      setFilterLoading(false);
-      return;
-    }
+    // No all/all shortcut to the scraped roster: the scrape's default stats
+    // include gauntlet games, so even the unfiltered view goes through the
+    // roster-stats endpoint (which merges quick_play+season+challenge). The
+    // scraped table shows until this lands, and stays up on fetch error.
     let cancelled = false;
     setFilterLoading(true);
     setFilterError(undefined);
