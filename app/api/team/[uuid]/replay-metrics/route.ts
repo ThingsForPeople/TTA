@@ -548,7 +548,8 @@ const NUMERIC_KEYS: (keyof PlayerGameMetrics)[] = [
 ];
 
 // GET — aggregated advanced stats across stored replay metrics.
-// Filters: ?days=N (completed within last N days), ?mode=season|quick_play|challenge, ?games=N (last N games).
+// Filters: ?days=N (completed within last N days), ?since=ISO (completed on/after — e.g.
+// the current season's Wednesday start), ?mode=season|quick_play|challenge, ?games=N (last N games).
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ uuid: string }> },
@@ -563,8 +564,14 @@ export async function GET(
   const mode = searchParams.get('mode') || '';
   const lastN = Number(searchParams.get('games')) || 0;
 
+  const sinceParam = searchParams.get('since');
+
   const conds = [eq(replayMetrics.userId, userId), eq(replayMetrics.teamUuid, uuid)];
   if (days > 0) conds.push(gte(replayMetrics.completedAt, new Date(Date.now() - days * 86_400_000)));
+  if (sinceParam) {
+    const since = new Date(sinceParam);
+    if (!Number.isNaN(since.getTime())) conds.push(gte(replayMetrics.completedAt, since));
+  }
   // A specific mode isolates that mode (incl. gauntlet); the default "All" view
   // EXCLUDES gauntlet so its non-representative roster doesn't pollute aggregate
   // stats/importance. `is distinct from` keeps null-mode rows (pre-mode syncs).

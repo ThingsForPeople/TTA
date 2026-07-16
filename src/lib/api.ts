@@ -22,6 +22,7 @@ export async function fetchTeamData(teamUuid: string): Promise<ParsedTeam> {
 
 export type TimeFilter =
   | 'all'
+  | 'season_now'
   | 'today'
   | 'yesterday'
   | 'l7'
@@ -37,6 +38,7 @@ export type ModeFilter = 'all' | 'quick_play' | 'challenge' | 'season' | 'gauntl
 
 export const TIME_OPTIONS: { value: TimeFilter; label: string }[] = [
   { value: 'all', label: 'All-time' },
+  { value: 'season_now', label: 'This season (since Wed)' },
   { value: 'today', label: 'Today' },
   { value: 'yesterday', label: 'Yesterday' },
   { value: 'l7', label: 'Last 7 days' },
@@ -66,6 +68,18 @@ const LAST_N_GAMES: Partial<Record<TimeFilter, number>> = {
   g100: 100,
 };
 
+// Seasons run Wed–Mon (ET); Tuesday is the offseason day. The current
+// season's window starts at the most recent Wednesday 00:00 ET — on a
+// Tuesday that resolves to the just-completed season.
+export function currentSeasonStart(): Date {
+  const now = new Date();
+  const et = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const wed = new Date(et);
+  wed.setDate(wed.getDate() - ((et.getDay() - 3 + 7) % 7));
+  wed.setHours(0, 0, 0, 0);
+  return new Date(wed.getTime() + (now.getTime() - et.getTime()));
+}
+
 function resolveTimeParams(time: TimeFilter): {
   since?: string;
   until?: string;
@@ -78,6 +92,8 @@ function resolveTimeParams(time: TimeFilter): {
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
   switch (time) {
+    case 'season_now':
+      return { since: currentSeasonStart().toISOString() };
     case 'today':
       return { since: startOfToday.toISOString() };
     case 'yesterday': {
