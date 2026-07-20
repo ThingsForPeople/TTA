@@ -19,6 +19,7 @@ import { benchOffenseImpacts, getSlotTalents, platoonDeltas, type BattingMode, t
 import { TALENT_BY_NAME } from '../lib/talents';
 import { buildFieldingGrades, type FieldingGrades } from '../lib/fieldingGrades';
 import type { AggregatedPlayer } from '../lib/parseReplay';
+import { fetchReplayMetrics } from '../lib/replayMetricsClient';
 
 function talentTooltip(label: string): string | undefined {
   const name = label.replace(/ Lv\d+$/, '').replace(/ \(.*\)$/, '');
@@ -299,9 +300,8 @@ export function FieldPositionsPanel({ team, metaStore, teamUuid, dataVersion = 0
   const [gradeGames, setGradeGames] = useState(0);
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/team/${teamUuid}/replay-metrics`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: { players?: AggregatedPlayer[]; totalGames?: number } | null) => {
+    fetchReplayMetrics<{ players?: AggregatedPlayer[]; totalGames?: number }>(teamUuid)
+      .then((data) => {
         if (cancelled || !data?.players?.length) return;
         setFieldingGrades(buildFieldingGrades(data.players));
         setGradeGames(data.totalGames ?? 0);
@@ -534,9 +534,8 @@ export function OptimalBattingOrder({ team, metaStore }: Props) {
   useEffect(() => {
     if (!vsHand || splits || !team.uuid) return;
     let cancelled = false;
-    fetch(`/api/team/${team.uuid}/replay-metrics`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: { players?: PlatoonSplitSource[] } | null) => {
+    fetchReplayMetrics<{ players?: PlatoonSplitSource[] }>(team.uuid)
+      .then((data) => {
         if (!cancelled) setSplits(data?.players ?? []);
       })
       .catch(() => { if (!cancelled) setSplits([]); });

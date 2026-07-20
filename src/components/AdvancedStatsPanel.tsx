@@ -8,6 +8,7 @@ import { maxAssignment } from '../lib/assign';
 import { OUT_OF_ZONE_CELL, zoneCellsForDirection } from '../lib/talentEffects';
 import { currentSeasonStart } from '../lib/api';
 import { talentMagnitudeAtTier } from '../lib/talentIndex';
+import { fetchReplayMetrics, invalidateReplayMetrics } from '../lib/replayMetricsClient';
 
 interface Props {
   teamUuid: string;
@@ -39,6 +40,17 @@ const VIEW_LABEL: Record<View, string> = { fielding: 'fielding', positions: 'by 
 interface HeatBin { x: number; y: number; pos: string; outs: number; hits: number }
 // Opponent spray bin — where balls were HIT against us (no position dimension).
 interface SprayBin { x: number; y: number; outs: number; hits: number }
+
+// Shape of the /replay-metrics GET response (the fields this panel consumes).
+interface MetricsResponse {
+  hasDb?: boolean;
+  players?: AggregatedPlayer[];
+  positionImportance?: PositionImportance[];
+  statWeights?: StatWeights;
+  heatBins?: HeatBin[];
+  sprayBins?: SprayBin[];
+  totalGames?: number;
+}
 
 // Canonical fielding position order, as scorekeeping numbers (C,1B,2B,SS,3B,LF,CF,RF).
 const POS_NUM_ORDER = [2, 3, 4, 6, 5, 7, 8, 9];
@@ -658,14 +670,13 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
     if (thisSeason) qs.set('since', currentSeasonStart().toISOString());
     if (lastN) qs.set('games', String(lastN));
     try {
-      const res = await fetch(`/api/team/${teamUuid}/replay-metrics?${qs}`);
-      if (!res.ok) {
+      const json = await fetchReplayMetrics<MetricsResponse>(teamUuid, qs.toString());
+      if (!json) {
         // 401 (signed out) etc. — show empty state rather than a scary error.
         setPlayers([]);
         setTotalGames(0);
         return;
       }
-      const json = await res.json();
       setHasDb(json.hasDb !== false);
       setPlayers(json.players ?? []);
       setPosImp(json.positionImportance ?? []);
@@ -728,6 +739,9 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
           setProgress({ done, total });
         }
       }
+      // The sync mutated the stored rows — drop every memoized fetch for this
+      // team so this panel and the other consumers all refetch fresh data.
+      invalidateReplayMetrics(teamUuid);
       await loadMetrics();
       onDataChange?.();
     } catch (e) {
@@ -743,6 +757,7 @@ export function AdvancedStatsPanel({ teamUuid, onDataChange }: Props) {
       'Clear stored fielding data for this team and re-sync the most-recent 100 games? This refreshes every metric (and backfills new ones).',
     )) return;
     try { await fetch(`/api/team/${teamUuid}/replay-sync`, { method: 'DELETE' }); } catch { /* fall through to sync */ }
+    invalidateReplayMetrics(teamUuid);
     await runSync();
   }, [teamUuid, runSync]);
 

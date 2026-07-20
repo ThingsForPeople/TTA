@@ -6,6 +6,7 @@ import { Markdown } from './Markdown';
 import { RateLimitBadge } from './RateLimitBadge';
 import { readRateLimitBody, readRateLimitHeaders, useRateLimit } from '../hooks/useRateLimit';
 import { useDropdownPosition } from '../hooks/useDropdownPosition';
+import { fetchReplayMetrics } from '../lib/replayMetricsClient';
 import { MAX_TALENT_LEVEL, type PlayerMetaStore } from '../lib/playerMeta';
 import type { Player } from '../lib/types';
 
@@ -198,8 +199,7 @@ export function TalentAdvisor({ players, metaStore, buildContext, buildCompactCo
   useEffect(() => {
     if (!teamUuid) return;
     let cancelled = false;
-    fetch(`/api/team/${teamUuid}/replay-metrics`)
-      .then((r) => (r.ok ? r.json() : null))
+    fetchReplayMetrics<{ players?: { playerId: string; pa: number; talents?: { name: string; acts: number; firedSwings: number; firedContact: number; activeSwings?: number; activeContact?: number }[] }[] }>(teamUuid)
       .then((json) => {
         if (cancelled || !json?.players) return;
         const map: Record<string, { name: string; perPA: number | null; firedSwings: number; firedContact: number; activeSwings: number; activeContact: number }[]> = {};
