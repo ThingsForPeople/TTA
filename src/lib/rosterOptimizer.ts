@@ -378,11 +378,13 @@ export function optimizeRoster(
   const empBonus = (pos: FieldPosition, uuid: string | undefined) =>
     empiricalFieldingBonus(pos, uuid, fieldingGrades, armImp(pos));
   const all = team.players ?? [];
-  const isPitcher = (p: Player) =>
-    p.position === 'P' || p.position === 'SP' || p === team.pitcher;
-
-  const pitcher = all.find(isPitcher);
-  const nonPitchers = all.filter((p) => !isPitcher(p));
+  // Exactly ONE player is the pitcher (position first, team.pitcher as
+  // fallback). A predicate matching both would silently drop the second
+  // matching player from every section: excluded here, never added back.
+  const pitcher =
+    all.find((p) => p.position === 'P' || p.position === 'SP') ??
+    all.find((p) => p === team.pitcher);
+  const nonPitchers = all.filter((p) => p !== pitcher);
   const pitcherMeta = pitcher?.uuid ? metaStore[pitcher.uuid] : undefined;
 
   const starters = nonPitchers.filter((p) => !p.bench);
