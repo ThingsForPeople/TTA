@@ -12,7 +12,7 @@ import {
   type ModeFilter,
   type TimeFilter,
 } from '@/lib/api';
-import { mapPlayer } from '@/lib/parseTeam';
+import { findPitcher, mapPlayer } from '@/lib/parseTeam';
 import { useAuthUser, AuthUserButton } from '@/hooks/useAuthUser';
 import { loadStore, saveStore, type PlayerMeta, type PlayerMetaStore } from '@/lib/playerMeta';
 import { fetchHistoryFromApi, mergeApiHistory } from '@/lib/statHistory';
@@ -225,7 +225,7 @@ export default function Dashboard() {
     }
 
     const baseTeam = filteredPlayers
-      ? { ...teamData.team, players, pitcher: players.find((p) => p.pitching !== undefined) ?? teamData.team.pitcher }
+      ? { ...teamData.team, players, pitcher: findPitcher(players) ?? teamData.team.pitcher }
       : { ...teamData.team, players };
     return baseTeam;
   }, [teamData, filteredPlayers]);

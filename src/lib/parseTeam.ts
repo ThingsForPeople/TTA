@@ -224,10 +224,22 @@ function mapRecentGame(rg: RawRecentGame): RecentGame {
   };
 }
 
+// The team's pitcher is the player LISTED at P — not just anyone with pitching
+// stats. `mapPlayer` attaches `pitching` to every player with career IP (so Two
+// Ways keep their ERA line), and rosters are ordered by batting slot with the P
+// batting 9th, so a stats-presence `find()` grabs the first position player who
+// ever mopped up an inning instead of the actual pitcher.
+export function findPitcher(players: Player[]): Player | undefined {
+  return (
+    players.find((p) => p.position === 'P' || p.position === 'SP') ??
+    players.find((p) => p.pitching !== undefined)
+  );
+}
+
 export function parseTeamHtml(html: string): ParsedTeam {
   const flight = parseFlight(html);
   const players = flight.roster.map(mapPlayer);
-  const pitcher = players.find((p) => p.pitching !== undefined);
+  const pitcher = findPitcher(players);
 
   const wins = flight.recentGames.filter((g) => g.won).length;
   const losses = flight.recentGames.length - wins;
