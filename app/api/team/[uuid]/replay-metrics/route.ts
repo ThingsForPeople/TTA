@@ -1,5 +1,5 @@
 import { getUser } from '@/lib/auth';
-import { and, eq, gte, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { db, hasDb } from '@/db';
 import { replayMetrics } from '@/db/schema';
 import type { PlayerGameMetrics, AggregatedPlayer, PositionImportance, PlayerPositionSplit } from '@/lib/parseReplay';
@@ -555,6 +555,54 @@ const NUMERIC_KEYS: (keyof PlayerGameMetrics)[] = [
   'paVsL', 'abVsL', 'hitsVsL', 'kVsL', 'paVsR', 'abVsR', 'hitsVsR', 'kVsR',
 ];
 
+type MetricsRow = {
+  playerId: string;
+  playerName: string;
+  position: number | null;
+  gameId: string;
+  completedAt: Date | null;
+  gameMode: string | null;
+  metrics: PlayerGameMetrics;
+};
+
+// Raw-row cache per (user, team). The full row set is ~1.3 MB of JSONB out of
+// Neon per query, and this endpoint is hit by several panels plus every filter
+// change — so each request first runs a ~100-byte count()+max(created_at)
+// fingerprint and only re-transfers the rows when it changes (sync inserts move
+// max(created_at); clears change the count). Time/mode/last-N filters are
+// applied in JS over the cached set. Warm serverless instances keep the map
+// across invocations; a cold or different instance just pays one full read.
+const rowCache = new Map<string, { stamp: string; rows: MetricsRow[] }>();
+const ROW_CACHE_MAX = 8;
+
+async function loadRows(userId: string, teamUuid: string): Promise<MetricsRow[]> {
+  const key = `${userId}:${teamUuid}`;
+  const [fp] = await db
+    .select({ n: sql<number>`count(*)::int`, m: sql<string | null>`max(created_at)::text` })
+    .from(replayMetrics)
+    .where(and(eq(replayMetrics.userId, userId), eq(replayMetrics.teamUuid, teamUuid)));
+  const stamp = `${fp?.n ?? 0}:${fp?.m ?? ''}`;
+  const hit = rowCache.get(key);
+  if (hit && hit.stamp === stamp) return hit.rows;
+
+  const rows = await db
+    .select({
+      playerId: replayMetrics.playerId,
+      playerName: replayMetrics.playerName,
+      position: replayMetrics.position,
+      gameId: replayMetrics.gameId,
+      completedAt: replayMetrics.completedAt,
+      gameMode: replayMetrics.gameMode,
+      metrics: replayMetrics.metrics,
+    })
+    .from(replayMetrics)
+    .where(and(eq(replayMetrics.userId, userId), eq(replayMetrics.teamUuid, teamUuid)));
+  rowCache.delete(key);
+  rowCache.set(key, { stamp, rows });
+  if (rowCache.size > ROW_CACHE_MAX) rowCache.delete(rowCache.keys().next().value!);
+  return rows;
+}
+
 // GET — aggregated advanced stats across stored replay metrics.
 // Filters: ?days=N (completed within last N days), ?since=ISO (completed on/after — e.g.
 // the current season's Wednesday start), ?mode=season|quick_play|challenge, ?games=N (last N games).
@@ -574,38 +622,39 @@ export async function GET(
 
   const sinceParam = searchParams.get('since');
 
-  const conds = [eq(replayMetrics.userId, userId), eq(replayMetrics.teamUuid, uuid)];
-  if (days > 0) conds.push(gte(replayMetrics.completedAt, new Date(Date.now() - days * 86_400_000)));
-  if (sinceParam) {
-    const since = new Date(sinceParam);
-    if (!Number.isNaN(since.getTime())) conds.push(gte(replayMetrics.completedAt, since));
-  }
-  // A specific mode isolates that mode (incl. gauntlet); the default "All" view
-  // EXCLUDES gauntlet so its non-representative roster doesn't pollute aggregate
-  // stats/importance. `is distinct from` keeps null-mode rows (pre-mode syncs).
-  if (mode) conds.push(eq(replayMetrics.gameMode, mode));
-  else conds.push(sql`${replayMetrics.gameMode} is distinct from 'gauntlet'`);
-
-  const rows = await db
-    .select({
-      playerId: replayMetrics.playerId,
-      playerName: replayMetrics.playerName,
-      position: replayMetrics.position,
-      gameId: replayMetrics.gameId,
-      completedAt: replayMetrics.completedAt,
-      metrics: replayMetrics.metrics,
-    })
-    .from(replayMetrics)
-    .where(and(...conds));
+  const rows = await loadRows(userId, uuid);
 
   let filtered = rows;
+  // A specific mode isolates that mode (incl. gauntlet); the default "All" view
+  // EXCLUDES gauntlet so its non-representative roster doesn't pollute aggregate
+  // stats/importance. Null-mode rows (pre-mode syncs) stay in the default view.
+  if (mode) filtered = filtered.filter((r) => r.gameMode === mode);
+  else filtered = filtered.filter((r) => r.gameMode !== 'gauntlet');
+  // `completed_at` is a naive (no-tz) column holding UTC clock times, but the
+  // driver parses it as a LOCAL-time Date — undo the runtime's offset before
+  // comparing against real epochs (no-op on UTC servers; matters in local dev).
+  const utcMs = (d: Date) => d.getTime() - d.getTimezoneOffset() * 60_000;
+  if (days > 0) {
+    const cutoff = Date.now() - days * 86_400_000;
+    filtered = filtered.filter((r) => r.completedAt && utcMs(r.completedAt) >= cutoff);
+  }
+  if (sinceParam) {
+    const since = new Date(sinceParam);
+    if (!Number.isNaN(since.getTime())) {
+      filtered = filtered.filter((r) => r.completedAt && utcMs(r.completedAt) >= since.getTime());
+    }
+  }
   if (lastN > 0) {
     // restrict to the most recent N distinct games
     const byGame = new Map<string, number>();
-    for (const r of rows) byGame.set(r.gameId, r.completedAt ? r.completedAt.getTime() : 0);
+    for (const r of filtered) byGame.set(r.gameId, r.completedAt ? r.completedAt.getTime() : 0);
     const keep = new Set([...byGame.entries()].sort((a, b) => b[1] - a[1]).slice(0, lastN).map(([g]) => g));
-    filtered = rows.filter((r) => keep.has(r.gameId));
+    filtered = filtered.filter((r) => keep.has(r.gameId));
   }
+
+  // The recalibration passes below replace each row's `metrics` object, so work
+  // on copies of the row wrappers — the cached originals must stay pristine.
+  filtered = filtered.map((r) => ({ ...r }));
 
   const totalGames = new Set(filtered.map((r) => r.gameId)).size;
   // Re-fit the out-curve from the VISIBLE set and recompute the curve-dependent

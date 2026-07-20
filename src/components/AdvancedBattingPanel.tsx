@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CollapsiblePanel } from './CollapsiblePanel';
 import type { AggregatedPlayer } from '../lib/parseReplay';
+import { fetchReplayMetrics } from '../lib/replayMetricsClient';
 
 // Replay-derived batting (contact quality) for the Stats → Batting section.
 // Read-only: it reads the same /replay-metrics aggregate the Defense section
@@ -64,9 +65,8 @@ export function AdvancedBattingPanel({ teamUuid, dataVersion = 0 }: Props) {
     if (mode) qs.set('mode', mode);
     if (lastN) qs.set('games', String(lastN));
     try {
-      const res = await fetch(`/api/team/${teamUuid}/replay-metrics?${qs}`);
-      if (!res.ok) { setPlayers([]); setTotalGames(0); return; }
-      const json = await res.json();
+      const json = await fetchReplayMetrics<{ hasDb?: boolean; players?: AggregatedPlayer[]; totalGames?: number }>(teamUuid, qs.toString());
+      if (!json) { setPlayers([]); setTotalGames(0); return; }
       setHasDb(json.hasDb !== false);
       setPlayers(json.players ?? []);
       setTotalGames(json.totalGames ?? 0);
