@@ -31,12 +31,14 @@ import {
 } from '../lib/statHistory';
 import { StatHistoryEditor } from './StatHistoryEditor';
 import { STANDALONE_TALENTS } from '../lib/talentClassify';
+import { fetchReplayTalents, mergeTalentsIntoStore } from '../lib/talentDetect';
 import type { PitchTalent } from '../lib/playerMeta';
 import type { Player, Team } from '../lib/types';
 import { PitchTalentEditor } from './PitchTalentEditor';
 import { Sparkline } from './Sparkline';
 import { TalentPicker } from './TalentPicker';
 import { ZoneCoverage } from './ZoneCoverage';
+import { GameAccountSync } from './GameAccountSync';
 
 interface Props {
   team: Team;
@@ -53,20 +55,6 @@ interface Props {
 // render would defeat PlayerRow's memo for every untracked row.
 const EMPTY_META = emptyMeta();
 
-// Order-insensitive signature of a player's talent bundle, so "detect" only
-// rewrites players whose talents actually changed (avoids churn / API writes).
-function talentSig(
-  talents: string[],
-  levels: Record<string, number> | undefined,
-  pitch: PitchTalent[] | undefined,
-): string {
-  const lv = Object.entries(levels ?? {}).filter(([, v]) => v > 1).sort();
-  const pt = (pitch ?? [])
-    .map((p) => [p.pitch, p.level, [...p.sub].map((s) => [s.name, s.level]).sort()])
-    .sort();
-  return JSON.stringify([[...talents].sort(), lv, pt]);
-}
-
 export function RosterEditor({ team, teamUuid, metaStore, onChange, onHistoryChange }: Props) {
   const [editingHistory, setEditingHistory] = useState<string | null>(null);
   const [historyVersion, setHistoryVersion] = useState(0);
@@ -77,25 +65,8 @@ export function RosterEditor({ team, teamUuid, metaStore, onChange, onHistoryCha
     setDetecting(true);
     setDetectMsg(null);
     try {
-      const res = await fetch(`/api/team/${teamUuid}/talents`);
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
-      const detected = (json.players ?? {}) as Record<
-        string,
-        { name: string; talents: string[]; talentLevels: Record<string, number>; pitchTalents: PitchTalent[] }
-      >;
-      const next: PlayerMetaStore = { ...metaStore };
-      let changed = 0;
-      for (const [uuid, d] of Object.entries(detected)) {
-        const cur = metaStore[uuid] ?? emptyMeta();
-        if (talentSig(cur.talents, cur.talentLevels, cur.pitchTalents) ===
-            talentSig(d.talents, d.talentLevels, d.pitchTalents)) {
-          continue; // already matches the replay — leave the object reference
-        }
-        next[uuid] = { ...cur, talents: d.talents, talentLevels: d.talentLevels, pitchTalents: d.pitchTalents };
-        changed++;
-      }
-      const found = Object.keys(detected).length;
+      const detected = await fetchReplayTalents(teamUuid);
+      const { next, changed, found } = mergeTalentsIntoStore(metaStore, detected);
       if (changed > 0) onChange(next);
       setDetectMsg(
         changed > 0
@@ -181,10 +152,11 @@ export function RosterEditor({ team, teamUuid, metaStore, onChange, onHistoryCha
         <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300">
           Roster
         </h2>
-        <div className="flex items-center gap-2">
+        <div className="relative flex items-center gap-2">
           <span className="text-[10px] text-slate-500">
             {Object.keys(metaStore).length}/{players.filter((p) => p.uuid).length} players tracked
           </span>
+          <GameAccountSync teamUuid={teamUuid} metaStore={metaStore} onChange={onChange} />
           <button
             type="button"
             onClick={detectTalents}
@@ -198,9 +170,11 @@ export function RosterEditor({ team, teamUuid, metaStore, onChange, onHistoryCha
       </div>
 
       <p className="mb-1 text-xs text-slate-500">
-        Sim stats and talents aren't in the public feed — enter them here as players level up.
-        Data saves automatically to your browser. <span className="text-slate-400">Detect talents from replay</span> auto-fills
-        talents + pitch talents from the latest game (overwrites the 9 who played; run after games to cover more of the roster).
+        Sim stats and talents aren't in the public feed — enter them here, or pull them automatically.
+        Data saves automatically to your browser. <span className="text-slate-400">Sync attributes</span> pulls exact
+        stats/age/handedness from your connected game account and folds in talents from the latest replay in one click.
+        <span className="text-slate-400"> Detect talents from replay</span> auto-fills just talents + pitch talents from the
+        latest game (no login; overwrites the 9 who played).
       </p>
       {detectMsg && <p className="mb-3 text-xs text-emerald-300/90">{detectMsg}</p>}
       {!detectMsg && <div className="mb-3" />}

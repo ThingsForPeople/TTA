@@ -117,6 +117,23 @@ export const replayMetrics = pgTable('replay_metrics', {
   index('replay_metrics_user_team_player').on(t.userId, t.teamUuid, t.playerId),
 ]);
 
+// A connected Tiny Teams game account. We store only an ENCRYPTED refresh token
+// (never the password) — the sync route mints short-lived access tokens from it
+// via /v1/auth/refresh. One app user can connect several game accounts (e.g.
+// two teams on separate logins); which account owns a given team is discovered
+// at sync time, so there's no team mapping to maintain here.
+export const gameAccounts = pgTable('game_accounts', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id),
+  label: text('label').notNull(),
+  refreshTokenEnc: text('refresh_token_enc').notNull(),
+  lastSyncedAt: timestamp('last_synced_at'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (t) => [
+  index('game_accounts_user').on(t.userId),
+]);
+
 export const usage = pgTable('usage', {
   id: uuid('id').defaultRandom().primaryKey(),
   userId: text('user_id').notNull().references(() => users.id),
