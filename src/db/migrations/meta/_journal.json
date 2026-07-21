@@ -64,6 +64,13 @@
       "when": 1779380000000,
       "tag": "0008_add_age",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1779390000000,
+      "tag": "0009_add_game_accounts",
+      "breakpoints": true
     }
   ]
 }
