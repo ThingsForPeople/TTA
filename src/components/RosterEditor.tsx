@@ -156,7 +156,7 @@ export function RosterEditor({ team, teamUuid, metaStore, onChange, onHistoryCha
           <span className="text-[10px] text-slate-500">
             {Object.keys(metaStore).length}/{players.filter((p) => p.uuid).length} players tracked
           </span>
-          <GameAccountSync teamUuid={teamUuid} metaStore={metaStore} onChange={onChange} />
+          <GameAccountSync teamUuid={teamUuid} metaStore={metaStore} onChange={onChange} onHistoryChange={onHistoryChange} />
           <button
             type="button"
             onClick={detectTalents}
