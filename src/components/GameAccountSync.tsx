@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { emptyMeta, normalizeArchetype, type Hand, type PlayerMetaStore } from '../lib/playerMeta';
 import { fetchReplayTalents, mergeTalentsIntoStore } from '../lib/talentDetect';
+import { recordSnapshot } from '../lib/statHistory';
 
 interface Account {
   id: string;
@@ -23,13 +24,15 @@ interface Props {
   teamUuid: string;
   metaStore: PlayerMetaStore;
   onChange: (next: PlayerMetaStore) => void;
+  // Fired after snapshots are recorded so the Training Progress chart refreshes.
+  onHistoryChange?: () => void;
 }
 
 // Pulls exact sim stats/age/handedness for the loaded team straight from the
 // user's Tiny Teams game account (private API), so they no longer hand-enter
 // them. Credentials are exchanged for a stored refresh token server-side; the
 // password is never persisted.
-export function GameAccountSync({ teamUuid, metaStore, onChange }: Props) {
+export function GameAccountSync({ teamUuid, metaStore, onChange, onHistoryChange }: Props) {
   const [open, setOpen] = useState(false);
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -113,6 +116,10 @@ export function GameAccountSync({ teamUuid, metaStore, onChange }: Props) {
           archetype: normalizeArchetype(u.archetype) ?? cur.archetype,
           age: u.age ?? cur.age,
         };
+        // Record a Training Progress snapshot from the real values. recordSnapshot
+        // buckets by training day (updates today's point instead of duplicating)
+        // and skips no-op changes, so repeat syncs don't spam the history.
+        recordSnapshot(u.playerUuid, u.sim);
       }
       // Best-effort: also fold in talents from the latest replay, so one click
       // refreshes the whole roster. A missing/rate-limited replay doesn't fail
@@ -128,6 +135,7 @@ export function GameAccountSync({ teamUuid, metaStore, onChange }: Props) {
         talentNote = ' (talent detect skipped)';
       }
       onChange(next);
+      onHistoryChange?.(); // refresh the Training Progress chart with the new snapshots
       setMsg(`Synced ${json.synced} players from ${json.account} (${json.teamName})${talentNote}.`);
       await loadAccounts();
     } catch (e) {

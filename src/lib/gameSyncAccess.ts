@@ -6,11 +6,13 @@ import { authDisabled } from './auth';
 // than exposed to everyone.
 //
 // GAME_SYNC_ALLOWED_EMAILS = comma-separated emails (edit in Vercel any time).
-//   • Local dev (AUTH_DISABLED) is always allowed — it's your own instance.
+//   • Local dev (the dev server, or an explicitly auth-disabled instance) is
+//     always allowed — it's your own single-user setup, regardless of whether
+//     Clerk is wired up locally.
 //   • If the var is unset/empty in a real auth deployment, NO ONE is allowed
 //     (fail closed), so the feature can't be accidentally exposed.
 export async function isGameSyncAllowed(): Promise<boolean> {
-  if (authDisabled) return true;
+  if (authDisabled || process.env.NODE_ENV === 'development') return true;
 
   const allowed = (process.env.GAME_SYNC_ALLOWED_EMAILS ?? '')
     .split(',')
